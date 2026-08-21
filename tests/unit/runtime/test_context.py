@@ -40,3 +40,16 @@ def test_job_result_only_emits_small_populated_metadata() -> None:
         "artifact_uri": "s3://bucket/key",
         "batch_id": "batch-1",
     }
+
+
+@pytest.mark.parametrize(
+    "artifact_uri",
+    [
+        "https://user:password@example.invalid/report.csv",
+        "https://example.invalid/report.csv?access_token=secret-value",
+        "https://example.invalid/report.csv?X-Amz-Signature=secret-value",
+    ],
+)
+def test_job_result_rejects_secret_bearing_artifact_uri(artifact_uri: str) -> None:
+    with pytest.raises(JobConfigurationError, match="must not contain credentials or tokens"):
+        JobResult(artifact_uri=artifact_uri)

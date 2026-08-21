@@ -52,10 +52,11 @@ A healthy project has no DAG import errors. The Pytest DAG integrity suite also 
 Targeted execution:
 
 ```bash
-airflow dags test <dag_id> <logical-date>
+airflow dags test example_simple_job 2026-08-21 \
+  --dagfile-path "$PWD/dags/example_simple_job.py"
 ```
 
-Do not run a DAG smoke test against real mutable integrations unless the test environment and inputs are explicitly safe. Use `dry_run`/mock Connections when the job supports them.
+The built-in `example_simple_job` is the preferred smoke target because it is deterministic and has no external integration. Do not run a DAG smoke test against real mutable integrations unless the test environment and inputs are explicitly safe. Use `dry_run`/mock Connections when the job supports them.
 
 ## Integration tests
 
@@ -101,9 +102,9 @@ Before delivery, verify:
 - overlap/concurrency is intentional;
 - Params validate manual inputs and contain no secrets;
 - Connections contain credentials/endpoints rather than source code;
-- XCom contains only small metadata/identifiers;
+- XCom contains only small metadata/identifiers and no credential-bearing artifact URI;
 - cross-task files live in shared/external storage;
-- logs do not contain credentials or sensitive payloads;
+- logs do not contain credentials, credential-bearing URIs, or sensitive payloads;
 - optional dependencies are isolated;
 - business logic has unit tests independent of Airflow services.
 
@@ -135,7 +136,9 @@ Use a disposable copy. Do not bootstrap the template repository merely to test t
 5. Ruff lint/format;
 6. Pytest + coverage/DAG integrity;
 7. secret scan;
-8. local Airflow metadata migration and DAG import smoke.
+8. wheel/package build check;
+9. local Airflow metadata migration + DAG import/serialization smoke;
+10. end-to-end execution of the deterministic `example_simple_job` with `airflow dags test`.
 
 No credential is hardcoded. Real integration jobs belong in separate environment-specific CI jobs when credentials/test systems exist.
 
@@ -146,6 +149,7 @@ Before producing a change ZIP or release artifact:
 ```bash
 python scripts/check_secrets.py
 python -m compileall -q src dags scripts tests examples
+python -m pip wheel --no-deps . --wheel-dir dist
 ```
 
 Inspect the archive and reject `.git`, `.venv`, caches, `.env`, logs, local Airflow metadata, or other temporary artifacts. A differential delivery should contain only files actually added or changed relative to the target branch.

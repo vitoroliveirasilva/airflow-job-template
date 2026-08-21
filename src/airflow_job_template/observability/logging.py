@@ -7,6 +7,7 @@ import logging
 from collections.abc import Mapping
 from datetime import date
 from typing import Any
+from urllib.parse import parse_qsl, urlsplit
 
 from airflow_job_template.runtime.context import JobRunContext
 
@@ -18,6 +19,15 @@ _SENSITIVE_FRAGMENTS = (
     "secret",
     "token",
 )
+_SENSITIVE_URI_QUERY_FRAGMENTS = (
+    "api_key",
+    "apikey",
+    "credential",
+    "password",
+    "secret",
+    "signature",
+    "token",
+)
 
 
 def _is_sensitive_key(key: str) -> bool:
@@ -25,16 +35,31 @@ def _is_sensitive_key(key: str) -> bool:
     return any(fragment in lowered for fragment in _SENSITIVE_FRAGMENTS)
 
 
+def _string_contains_uri_secret(value: str) -> bool:
+    try:
+        parsed = urlsplit(value)
+    except ValueError:
+        return False
+    if parsed.username is not None or parsed.password is not None:
+        return True
+    return any(
+        any(fragment in key.lower() for fragment in _SENSITIVE_URI_QUERY_FRAGMENTS)
+        for key, _query_value in parse_qsl(parsed.query, keep_blank_values=True)
+    )
+
+
 def _safe_value(value: Any) -> str | int | float | bool | None:
-    if value is None or isinstance(value, str | int | float | bool):
+    if value is None or isinstance(value, int | float | bool):
         return value
+    if isinstance(value, str):
+        return "<redacted>" if _string_contains_uri_secret(value) else value
     if isinstance(value, date):
         return value.isoformat()
-    return str(value)
+    return f"<{type(value).__name__}>"
 
 
 def redact_fields(fields: Mapping[str, Any]) -> dict[str, Any]:
-    """Redact fields with obviously sensitive names before they reach the logger"""
+    """Redact sensitive names and avoid serializing arbitrary object representations"""
 
     return {
         key: "<redacted>" if _is_sensitive_key(key) else _safe_value(value)

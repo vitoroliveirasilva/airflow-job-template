@@ -48,7 +48,14 @@ jobs:
       - name: Secret scan
         run: python scripts/check_secrets.py
 
-      - name: Airflow import smoke
+      - name: Package build check
+        shell: bash
+        run: |
+          rm -rf dist
+          python -m pip wheel --no-deps . --wheel-dir dist
+          test "$(find dist -maxdepth 1 -type f -name '*.whl' | wc -l)" -eq 1
+
+      - name: Airflow import and execution smoke
         shell: bash
         run: |
           airflow db migrate
@@ -66,3 +73,7 @@ jobs:
           AIRFLOW__LOGGING__LOGGING_LEVEL=ERROR PYTHONWARNINGS=ignore \
             airflow dags list-import-errors --output json 2>/dev/null \
             | jq -e 'type == "array" and length == 0'
+
+          # Execute the deterministic no-integration example end-to-end.
+          airflow dags test example_simple_job 2026-08-21 \
+            --dagfile-path "${AIRFLOW__CORE__DAGS_FOLDER}/example_simple_job.py"

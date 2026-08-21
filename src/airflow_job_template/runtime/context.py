@@ -5,8 +5,34 @@ from dataclasses import dataclass, fields
 from datetime import datetime
 from types import MappingProxyType
 from typing import Any
+from urllib.parse import parse_qsl, urlsplit
 
 from .errors import JobConfigurationError
+
+_SENSITIVE_URI_QUERY_FRAGMENTS = (
+    "api_key",
+    "apikey",
+    "credential",
+    "password",
+    "secret",
+    "signature",
+    "token",
+)
+
+
+def _artifact_uri_contains_secret(uri: str) -> bool:
+    """Detect credential-bearing URIs that must never be emitted through XCom"""
+
+    try:
+        parsed = urlsplit(uri)
+    except ValueError:
+        return True
+    if parsed.username is not None or parsed.password is not None:
+        return True
+    return any(
+        any(fragment in key.lower() for fragment in _SENSITIVE_URI_QUERY_FRAGMENTS)
+        for key, _value in parse_qsl(parsed.query, keep_blank_values=True)
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -50,6 +76,10 @@ class JobResult:
             value = getattr(self, name)
             if value is not None and not value.strip():
                 raise JobConfigurationError(f"JobResult.{name} cannot be blank")
+        if self.artifact_uri is not None and _artifact_uri_contains_secret(self.artifact_uri):
+            raise JobConfigurationError(
+                "JobResult.artifact_uri must not contain credentials or tokens"
+            )
 
     def to_xcom(self) -> dict[str, int | str]:
         """Return only explicitly populated scalar metadata"""
