@@ -1,7 +1,7 @@
-"""
-Protocol-specific SAP extension example with no SAP SDK dependency
+"""Protocol-specific SAP extension example with no SAP SDK dependency.
 
-This is intentionally not a universal ``SAPClient``. Replace ``ODataReader`` only when the deployment protocol is known and its dependency fits the selected worker/runtime.
+This is intentionally not a universal ``SAPClient``. Replace ``ODataReader`` only when the
+runtime protocol is known and its dependency fits the selected worker environment.
 """
 
 from __future__ import annotations

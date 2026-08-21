@@ -78,10 +78,10 @@ class HttpClient:
         headers: Mapping[str, str] | None = None,
         retry_safe: bool | None = None,
     ) -> Any:
-        """
-        Perform one request, classify status codes, and decode JSON safely
+        """Perform one request, classify status codes, and decode JSON safely.
 
-        Mutating methods are not considered retry-safe by default. A caller may set ``retry_safe=True`` only after making the operation idempotent, for example with a deterministic idempotency key or a verified UPSERT-like remote contract.
+        Mutating methods are not retry-safe by default. Set ``retry_safe=True`` only after the
+        operation is idempotent, for example via an idempotency key or a verified remote contract.
         """
 
         normalized_method = method.upper().strip()

@@ -1,7 +1,7 @@
-"""
-Public runtime surface for DAG authors
+"""Public runtime surface for DAG authors.
 
-Pure dataclasses and errors stay importable without Airflow. The single-task factory loads lazily only when a DAG requests it.
+Pure dataclasses and errors stay importable without Airflow. The single-task factory loads lazily
+only when a DAG requests it.
 """
 
 from .context import JobResult, JobRunContext, job_run_context_from_airflow
