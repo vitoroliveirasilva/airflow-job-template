@@ -30,11 +30,26 @@ For `customer_sync`, the Python package becomes `customer_sync_airflow`. The scr
 
 Use lowercase slugs with letters, numbers, `_` or `-`.
 
-## 2. Create a Python 3.12 environment
+## 2. Choose the development mode
 
-Airflow is supported on POSIX systems. On Windows, use WSL2 or a Linux container rather than running the Airflow services natively in Windows PowerShell.
+Airflow 3.3.1 runs on POSIX-compliant systems. On Windows, use WSL2 or a Linux container for the full Airflow runtime. Native PowerShell is still useful for the fast pure-Python development loop; Git Bash does not turn native Windows into a supported Airflow runtime.
 
-Linux/macOS/WSL2:
+### Windows PowerShell: pure-Python loop
+
+```powershell
+py -3.12 -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip
+python -m pip install -r requirements/dev.txt
+python -m pip install --no-deps -e .
+ruff format --check .
+ruff check .
+pytest
+```
+
+The Airflow runtime/DAG-integrity modules are intentionally skipped on native Windows. A green PowerShell run validates the Airflow-independent core, scaffolding, integrations, security helpers, and job logic; it does not replace the Linux/WSL2/CI Airflow acceptance gate.
+
+### Linux/macOS/WSL2: full Airflow environment
 
 ```bash
 python3.12 -m venv .venv
@@ -44,9 +59,9 @@ python -m pip install --upgrade pip
 
 ## 3. Install Airflow reproducibly
 
-Always install Airflow using the constraints file matching both Airflow and Python.
+Always install Airflow using the constraints file matching both Airflow and Python. Run this section on Linux, macOS, or WSL2 rather than native Windows.
 
-Bash/Git Bash:
+Linux/macOS/WSL2:
 
 ```bash
 AIRFLOW_VERSION=3.3.1
@@ -150,7 +165,6 @@ See `dags/example_workflow.py`.
 ```python
 dag_kwargs = SPEC.as_dag_kwargs()
 schedule = dag_kwargs.pop("schedule")
-
 
 @dag(schedule=schedule, **dag_kwargs)
 def workflow():
@@ -260,7 +274,7 @@ For browser automation, keep one browser session inside one task when there is n
 
 ## Logging and security
 
-Use normal Python logging. `log_event()` adds compact execution context and redacts fields whose names indicate credentials/tokens/passwords. Do not rely on redaction alone: never pass secret payloads to the logger in the first place.
+Use normal Python logging. `log_event()` adds compact execution context, redacts fields whose names indicate credentials/tokens/passwords, redacts credential-bearing URI strings, and avoids serializing arbitrary object representations. `JobResult.artifact_uri` also rejects URIs containing embedded credentials or sensitive token/signature query parameters before they can reach XCom. Do not rely on these safeguards alone: never pass secret payloads to the logger or XCom in the first place.
 
 Security defaults/rules:
 
@@ -285,7 +299,7 @@ ruff format --check .
 python scripts/check_secrets.py
 ```
 
-With Airflow installed:
+With Airflow installed on Linux/macOS/WSL2:
 
 ```bash
 export AIRFLOW_HOME="$PWD/.airflow"
@@ -293,14 +307,18 @@ export AIRFLOW__CORE__DAGS_FOLDER="$PWD/dags"
 export PYTHONPATH="$PWD/src"
 
 airflow db migrate
+airflow dags list --local
+airflow dags list-import-errors --local
+airflow dags reserialize
 airflow dags list
 airflow dags list-import-errors
 ```
 
-For a targeted smoke test, use an appropriate logical date/run according to the job:
+The local commands prove filesystem parsing; `reserialize` plus the non-local commands prove metadata serialization. For a targeted execution smoke test, use the deterministic built-in DAG:
 
 ```bash
-airflow dags test example_simple_job 2026-08-21
+airflow dags test example_simple_job 2026-08-21 \
+  --dagfile-path "$PWD/dags/example_simple_job.py"
 ```
 
 Integration tests are separate:
@@ -310,6 +328,12 @@ pytest -m integration
 ```
 
 The default test run must not call real external systems. See `docs/development.md` for gates and `docs/architecture.md` for the architecture contract.
+
+## Release acceptance
+
+A candidate release is accepted only after the Linux CI pipeline passes the coordinated Airflow installation, `pip check`, public `airflow.sdk` smoke, Ruff, Pytest/coverage and DAG integrity, secret scan, wheel build, local + serialized DAG import checks, and the end-to-end `example_simple_job` execution. Native Windows results are a developer feedback loop, not a substitute for this Airflow runtime gate.
+
+The repository should remain free of `.env`, local Airflow metadata, caches, logs, virtual environments, and generated build artifacts. Keep optional providers opt-in and introduce new abstractions only after repeated real use justifies them.
 
 ## Which pattern should I choose?
 

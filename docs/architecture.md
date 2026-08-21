@@ -42,6 +42,7 @@ It translates directly to DAG kwargs. Exceptional Airflow kwargs can be passed e
 `JobRunContext` adapts only the runtime fields normal Python logic needs, making jobs testable with a plain dataclass fixture. It does not reproduce the full Airflow `Context`.
 
 `JobResult` carries small scalar metadata only. Large objects belong in external/shared storage.
+`artifact_uri` is metadata rather than a credential carrier: URIs with embedded user/password data or sensitive token/signature query parameters are rejected before XCom serialization.
 
 ### Simple Job factory
 
@@ -101,7 +102,15 @@ Retry safety is designed per job, typically using unique keys/UPSERT, idempotenc
 
 ## Security model
 
-The code holds only Connection IDs. Connection contents and deployment secrets are external to the repository. TLS verification remains at secure defaults; SQL values are parameterized; scaffold inputs become validated paths/identifiers rather than shell commands; logging redacts obvious secret field names and callers must avoid logging sensitive payloads.
+The code holds only Connection IDs. Connection contents and deployment secrets are external to the repository. TLS verification remains at secure defaults; SQL values are parameterized; scaffold inputs become validated paths/identifiers rather than shell commands.
+
+Structured logging redacts obvious secret field names and credential-bearing URI strings. Arbitrary object representations are not serialized because client/connection objects can hide credentials in `__str__`/`__repr__`; non-scalar objects are represented only by type name. `JobResult.artifact_uri` rejects common credential-bearing URI forms before they can be returned through XCom. These are defense-in-depth controls, not permission to log secret payloads.
+
+## Platform and validation boundary
+
+The Airflow runtime is a POSIX concern. Native Windows is supported only as a fast Airflow-independent Python development loop; WSL2/Linux or the Ubuntu CI workflow owns Airflow installation, DAG integrity, local/serialized parsing, and end-to-end DAG execution. This keeps platform-specific runtime failures from being confused with failures in pure job code while preserving a single release gate.
+
+The release pipeline validates the coordinated Airflow dependency set, the public `airflow.sdk` surface, lint/format, unit and DAG-integrity tests, secret scanning, wheel construction, DAG parsing/serialization, and deterministic execution of `example_simple_job`.
 
 ## Why there is no bigger framework
 

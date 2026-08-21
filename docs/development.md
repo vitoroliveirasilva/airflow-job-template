@@ -2,7 +2,19 @@
 
 ## Pure-Python loop
 
-Most business logic and helper tests run without an Airflow service:
+Most business logic and helper tests run without an Airflow service. On native Windows, this is the supported development loop; full Airflow validation belongs in WSL2/Linux or CI. Git Bash remains a Windows compatibility shell and is not a substitute for WSL2/Linux Airflow validation.
+
+PowerShell setup:
+
+```powershell
+py -3.12 -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip
+python -m pip install -r requirements/dev.txt
+python -m pip install --no-deps -e .
+```
+
+Quality loop on any development environment:
 
 ```bash
 pytest
@@ -11,11 +23,13 @@ ruff format --check .
 python scripts/check_secrets.py
 ```
 
+On native Windows, the Airflow DAG-integrity/runtime test modules are intentionally skipped before importing Airflow. Those skips are expected and must be covered by the Linux CI gate before release.
+
 The `job_context` Pytest fixture is a normal `JobRunContext`, so job tests do not need scheduler/API server startup. External integrations should be injected/faked at their boundary.
 
-## Airflow environment
+## Full Airflow environment (Linux/macOS/WSL2)
 
-Use Python 3.12 and Airflow 3.3.1 with the matching official constraints. Install Airflow and the Standard provider in one resolver transaction, then verify both dependency metadata and the public SDK surface before running tests:
+Use Python 3.12 and Airflow 3.3.1 with the matching official constraints. Install Airflow and the Standard provider in one resolver transaction, then install the development tooling/project and verify both dependency metadata and the public SDK surface:
 
 ```bash
 AIRFLOW_VERSION=3.3.1
@@ -25,6 +39,8 @@ python -m pip install \
   "apache-airflow==${AIRFLOW_VERSION}" \
   apache-airflow-providers-standard \
   --constraint "${CONSTRAINT_URL}"
+python -m pip install -r requirements/dev.txt
+python -m pip install --no-deps -e .
 python -m pip check
 python -c "from airflow.sdk import DAG, ObjectStoragePath, task; print('airflow.sdk import smoke: OK')"
 ```
@@ -43,11 +59,14 @@ Initialize local metadata only when Airflow-level testing is needed:
 
 ```bash
 airflow db migrate
+airflow dags list --local
+airflow dags list-import-errors --local
+airflow dags reserialize
 airflow dags list
 airflow dags list-import-errors
 ```
 
-A healthy project has no DAG import errors. The Pytest DAG integrity suite also verifies unique DAG/task IDs, catchup, timezone-aware start dates, tags, and task execution timeouts when Airflow is installed.
+A healthy project has no DAG import errors in either the direct filesystem parse or the serialized metadata view. The Pytest DAG integrity suite also verifies unique DAG/task IDs, catchup, timezone-aware start dates, tags, and task execution timeouts when Airflow is installed.
 
 Targeted execution:
 
@@ -140,7 +159,7 @@ Use a disposable copy. Do not bootstrap the template repository merely to test t
 9. local Airflow metadata migration + DAG import/serialization smoke;
 10. end-to-end execution of the deterministic `example_simple_job` with `airflow dags test`.
 
-No credential is hardcoded. Real integration jobs belong in separate environment-specific CI jobs when credentials/test systems exist.
+No credential is hardcoded. Real integration jobs belong in separate environment-specific CI jobs when credentials/test systems exist. For contributors on Windows, this Linux workflow is the release-level Airflow acceptance gate; a local PowerShell run alone is not sufficient for promotion.
 
 ## Packaging/delivery hygiene
 
