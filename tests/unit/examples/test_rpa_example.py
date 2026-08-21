@@ -1,7 +1,6 @@
 from pathlib import Path
 
 import pytest
-
 from examples.rpa.example import update_record
 
 

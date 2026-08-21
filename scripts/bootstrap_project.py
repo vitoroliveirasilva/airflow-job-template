@@ -14,6 +14,11 @@ PLACEHOLDER_PACKAGE = "airflow_job_template"
 TOOL_NAME = "airflow-job-template"
 SKIP_DIRS = {".git", ".venv", "__pycache__", ".pytest_cache", ".ruff_cache", "dist", "build"}
 TEXT_SUFFIXES = {".py", ".toml", ".md", ".txt", ".yml", ".yaml"}
+PROTECTED_PATHS = {
+    Path("scripts/bootstrap_project.py"),
+    Path("tests/unit/scripts/test_bootstrap_project.py"),
+    Path("tests/unit/scripts/test_new_job.py"),
+}
 SLUG_RE = re.compile(r"^[a-z][a-z0-9_-]{1,63}$")
 
 
@@ -67,6 +72,9 @@ def _iter_text_files(root: Path):
         if any(part in SKIP_DIRS for part in path.parts):
             continue
         if path.name.startswith(".env"):
+            continue
+        relative = path.relative_to(root)
+        if relative in PROTECTED_PATHS:
             continue
         if path.suffix in TEXT_SUFFIXES:
             yield path

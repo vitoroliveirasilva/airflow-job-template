@@ -7,7 +7,7 @@ name = "airflow-job-template"
 version = "0.1.0"
 description = "Reusable starter for production-oriented Apache Airflow jobs and workflows."
 readme = "README.md"
-requires-python = ">=3.12,<3.13"
+requires-python = ">=3.12,<3.15"
 license = { text = "MIT" }
 authors = [
   { name = "Vitor Oliveira Silva", email = "vitorsimon04@gmail.com" },
@@ -53,7 +53,7 @@ line-length = 100
 src = ["src", "tests", "scripts", "dags", "examples"]
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "UP", "B", "S", "SIM", "PIE", "RUF"]
+select = ["E", "F", "I", "UP", "B", "S", "SIM", "PIE", "RUF", "AIR"]
 ignore = ["S608"]
 
 [tool.ruff.lint.per-file-ignores]

@@ -1,7 +1,6 @@
 from pathlib import Path
 
 import pytest
-
 from scripts.bootstrap_project import bootstrap
 from scripts.new_job import ScaffoldError, create_job
 
@@ -46,9 +45,24 @@ def test_scaffold_refuses_overwrite(tmp_path: Path) -> None:
         create_job(root, "customer_sync", "simple")
 
 
+def test_workflow_scaffold_keeps_schedule_explicit(tmp_path: Path) -> None:
+    root = _bootstrapped_template(tmp_path)
+    create_job(root, "billing_pipeline", "workflow")
+    text = (root / "dags/billing_pipeline.py").read_text(encoding="utf-8")
+    assert "@dag(schedule=DAG_SCHEDULE, **DAG_KWARGS)" in text
+
+
 def test_isolated_scaffold_uses_native_external_python(tmp_path: Path) -> None:
     root = _bootstrapped_template(tmp_path)
     create_job(root, "portal_update", "isolated")
     text = (root / "dags/portal_update.py").read_text(encoding="utf-8")
     assert "@task.external_python" in text
     assert "TaskPolicy(retries=0)" in text
+    assert "@dag(schedule=DAG_SCHEDULE, **DAG_KWARGS)" in text
+
+
+@pytest.mark.parametrize("name", ["class", "import", "async", "await"])
+def test_scaffold_rejects_python_keywords(tmp_path: Path, name: str) -> None:
+    root = _bootstrapped_template(tmp_path)
+    with pytest.raises(ScaffoldError, match="reserved Python keyword"):
+        create_job(root, name, "simple")

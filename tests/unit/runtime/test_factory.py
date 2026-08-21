@@ -1,4 +1,12 @@
+import sys
+
 import pytest
+
+if sys.platform == "win32":
+    pytest.skip(
+        "Airflow runtime tests require a POSIX environment; use WSL2/Linux or CI",
+        allow_module_level=True,
+    )
 
 pytest.importorskip("airflow")
 

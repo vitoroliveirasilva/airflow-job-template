@@ -16,7 +16,11 @@ SPEC = JobSpec(
 )
 
 
-@dag(**SPEC.as_dag_kwargs())
+DAG_KWARGS = SPEC.as_dag_kwargs()
+DAG_SCHEDULE = DAG_KWARGS.pop("schedule")
+
+
+@dag(schedule=DAG_SCHEDULE, **DAG_KWARGS)
 def workflow():
     @task(**POLICY.as_task_kwargs())
     def extract_task() -> dict:

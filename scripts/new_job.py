@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import keyword
 import os
 import re
 import sys
@@ -23,6 +24,8 @@ def validate_job_name(name: str) -> str:
     normalized = name.strip().lower()
     if not JOB_RE.fullmatch(normalized):
         raise ScaffoldError("job name must be 2..100 snake_case characters and start with a letter")
+    if keyword.iskeyword(normalized):
+        raise ScaffoldError(f"job name {normalized!r} is a reserved Python keyword")
     return normalized
 
 
@@ -134,7 +137,11 @@ def _workflow_files(package: str, name: str) -> dict[str, str]:
             )
 
 
-            @dag(**SPEC.as_dag_kwargs())
+            DAG_KWARGS = SPEC.as_dag_kwargs()
+            DAG_SCHEDULE = DAG_KWARGS.pop("schedule")
+
+
+            @dag(schedule=DAG_SCHEDULE, **DAG_KWARGS)
             def workflow():
                 @task(**SPEC.task_policy.as_task_kwargs())
                 def extract_task() -> dict[str, int | str]:
@@ -221,7 +228,11 @@ def _isolated_files(package: str, name: str) -> dict[str, str]:
             )
 
 
-            @dag(**SPEC.as_dag_kwargs())
+            DAG_KWARGS = SPEC.as_dag_kwargs()
+            DAG_SCHEDULE = DAG_KWARGS.pop("schedule")
+
+
+            @dag(schedule=DAG_SCHEDULE, **DAG_KWARGS)
             def workflow():
                 @task.external_python(
                     python="/path/to/specialized/venv/bin/python",

@@ -1,4 +1,5 @@
-"""SAP extension point
+"""
+Extension point for concrete SAP protocols
 
-Add protocol-specific adapters here only when the real environment is known, for example OData, RFC or HANA. SAP GUI belongs with an isolated/RPA execution profile instead of a core integration because it is not a protocol but a proprietary client application.
+Add adapters only when the real protocol is known, such as OData, RFC, or HANA. SAP GUI belongs with an isolated/RPA execution profile rather than the core integration layer.
 """

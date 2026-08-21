@@ -1,6 +1,4 @@
-"""
-Minimal single-task job: edit the spec and the job's ``run`` function in ``src/airflow_job_template/jobs/example_simple.py`` to implement your own job
-"""
+"""Minimal single-task job: edit the spec and the job's ``run`` function"""
 
 from airflow_job_template.jobs.example_simple import run
 from airflow_job_template.runtime import JobSpec, build_single_task_dag

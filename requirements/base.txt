@@ -1,3 +1,4 @@
-# Install with the official Airflow constraints for Python 3.12
+# Do not install this file unconstrained; use the matching official Airflow constraints.
+# Install with the official Airflow constraints for Python 3.12.
 apache-airflow==3.3.1
 apache-airflow-providers-standard

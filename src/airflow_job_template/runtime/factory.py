@@ -7,8 +7,8 @@ from collections.abc import Callable, Mapping
 from time import perf_counter
 from typing import Any
 
-from airflow.sdk.exceptions import AirflowFailException
 from airflow.sdk import DAG, get_current_context, task
+from airflow.sdk.exceptions import AirflowFailException
 
 from airflow_job_template.observability.logging import log_event
 
@@ -33,10 +33,11 @@ def build_single_task_dag(
         raise ValueError("task_id cannot be blank")
 
     dag_kwargs = spec.as_dag_kwargs(**dict(dag_overrides or {}))
+    schedule = dag_kwargs.pop("schedule")
     task_kwargs = spec.task_policy.as_task_kwargs()
     task_kwargs.update(dict(task_overrides or {}))
 
-    with DAG(**dag_kwargs) as dag:
+    with DAG(schedule=schedule, **dag_kwargs) as dag:
 
         @task(task_id=task_id, **task_kwargs)
         def execute_job() -> dict[str, int | str] | None:

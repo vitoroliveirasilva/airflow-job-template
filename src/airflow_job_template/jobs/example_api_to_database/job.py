@@ -73,4 +73,4 @@ def run(
         processed += len(pending)
 
     log_event(logger, "write_completed", context=context, processed=processed, dry_run=dry_run)
-    return JobResult(processed=processed, updated=processed if not dry_run else 0)
+    return JobResult(processed=processed)

@@ -1,7 +1,6 @@
 from pathlib import Path
 
 import pytest
-
 from scripts.bootstrap_project import BootstrapError, bootstrap
 
 PYPROJECT = """\
@@ -27,9 +26,7 @@ def _template(tmp_path: Path) -> Path:
     return tmp_path
 
 
-def test_bootstrap_renames_package_and_imports_without_touching_env(
-    tmp_path: Path,
-) -> None:
+def test_bootstrap_renames_package_and_imports_without_touching_env(tmp_path: Path) -> None:
     root = _template(tmp_path)
     bootstrap(root, "customer_sync")
 
@@ -47,3 +44,21 @@ def test_bootstrap_refuses_second_execution(tmp_path: Path) -> None:
     bootstrap(root, "customer_sync")
     with pytest.raises(BootstrapError, match="already bootstrapped"):
         bootstrap(root, "another_project")
+
+
+def test_bootstrap_does_not_rewrite_its_own_contract_tests(tmp_path: Path) -> None:
+    root = _template(tmp_path)
+    protected = {
+        "scripts/bootstrap_project.py": 'PLACEHOLDER_PACKAGE = "airflow_job_template"\n',
+        "tests/unit/scripts/test_bootstrap_project.py": "airflow_job_template\n",
+        "tests/unit/scripts/test_new_job.py": "airflow_job_template\n",
+    }
+    for relative, content in protected.items():
+        path = root / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content, encoding="utf-8")
+
+    bootstrap(root, "customer_sync")
+
+    for relative, content in protected.items():
+        assert (root / relative).read_text(encoding="utf-8") == content

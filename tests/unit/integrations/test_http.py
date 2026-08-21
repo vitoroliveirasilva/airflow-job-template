@@ -90,3 +90,37 @@ def test_mutating_request_can_opt_into_retry_after_idempotency_is_established() 
             headers={"Idempotency-Key": "run-123"},
             retry_safe=True,
         )
+
+
+def test_missing_airflow_connection_fails_fast_without_retry() -> None:
+    class AirflowNotFoundException(RuntimeError):
+        pass
+
+    class MissingConnectionHook:
+        def run(self, endpoint: str, **kwargs):
+            raise AirflowNotFoundException("missing")
+
+    client = HttpClient(
+        "missing_api",
+        hook_factory=lambda _conn_id, _method: MissingConnectionHook(),
+    )
+    from airflow_job_template.runtime import JobConfigurationError
+
+    with pytest.raises(JobConfigurationError, match="missing_api"):
+        client.request_json("GET", "/customers")
+
+
+def test_tls_verification_failure_is_not_retried() -> None:
+    class SSLError(RuntimeError):
+        pass
+
+    class TlsFailureHook:
+        def run(self, endpoint: str, **kwargs):
+            raise SSLError("certificate verify failed")
+
+    client = HttpClient(
+        "crm_api",
+        hook_factory=lambda _conn_id, _method: TlsFailureHook(),
+    )
+    with pytest.raises(NonRetryableJobError):
+        client.request_json("GET", "/customers")

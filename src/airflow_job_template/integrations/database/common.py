@@ -57,12 +57,7 @@ def _raise_db_error(exc: Exception, *, operation: str, conn_id: str) -> None:
     message = f"database {operation} failed for conn_id={conn_id!r}"
     if class_names & {"OperationalError", "InterfaceError"}:
         raise RetryableJobError(message) from exc
-    if class_names & {
-        "ProgrammingError",
-        "IntegrityError",
-        "DataError",
-        "NotSupportedError",
-    }:
+    if class_names & {"ProgrammingError", "IntegrityError", "DataError", "NotSupportedError"}:
         raise NonRetryableJobError(message) from exc
     raise exc
 
@@ -167,21 +162,29 @@ class DatabaseClient:
         if fetch_size < 1:
             raise JobConfigurationError("fetch_size must be >= 1")
 
-        connection = self.get_hook().get_conn()
-        cursor = connection.cursor()
+        connection: _Connection | None = None
+        cursor: _Cursor | None = None
         try:
+            connection = self.get_hook().get_conn()
+            cursor = connection.cursor()
             cursor.execute(sql, parameters)
             while True:
                 rows = cursor.fetchmany(fetch_size)
                 if not rows:
                     break
                 yield from rows
+        except JobConfigurationError:
+            raise
         except Exception as exc:
             _raise_db_error(exc, operation="fetch", conn_id=self.conn_id)
         finally:
-            try:
-                cursor.close()
-            finally:
+            if cursor is not None:
+                try:
+                    cursor.close()
+                finally:
+                    if connection is not None:
+                        connection.close()
+            elif connection is not None:
                 connection.close()
 
     def fetch_all(

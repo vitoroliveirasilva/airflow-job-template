@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import logging
 from collections.abc import Mapping
-from datetime import date, datetime
+from datetime import date
 from typing import Any
 
 from airflow_job_template.runtime.context import JobRunContext
@@ -26,9 +26,9 @@ def _is_sensitive_key(key: str) -> bool:
 
 
 def _safe_value(value: Any) -> str | int | float | bool | None:
-    if value is None or isinstance(value, (str, int, float, bool)):
+    if value is None or isinstance(value, str | int | float | bool):
         return value
-    if isinstance(value, (date, datetime)):
+    if isinstance(value, date):
         return value.isoformat()
     return str(value)
 

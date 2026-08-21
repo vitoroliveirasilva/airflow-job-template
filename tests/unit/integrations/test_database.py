@@ -114,3 +114,26 @@ def test_programming_error_is_non_retryable() -> None:
         client.execute("BROKEN SQL")
     assert connection.rolled_back is True
     assert connection.closed is True
+
+
+def test_iter_rows_classifies_connection_failure_and_has_nothing_to_leak() -> None:
+    class FailingHook:
+        def get_conn(self):
+            raise OperationalError("database unavailable")
+
+    client = DatabaseClient("source_db", hook_factory=lambda _conn_id: FailingHook())
+    with pytest.raises(RetryableJobError):
+        list(client.iter_rows("SELECT id FROM t"))
+
+
+def test_iter_rows_closes_connection_when_cursor_creation_fails() -> None:
+    class CursorFailureConnection(Connection):
+        def cursor(self):
+            raise ProgrammingError("cursor configuration invalid")
+
+    connection = CursorFailureConnection(Cursor())
+    client = DatabaseClient("source_db", hook_factory=lambda _conn_id: Hook(connection))
+
+    with pytest.raises(NonRetryableJobError):
+        list(client.iter_rows("SELECT id FROM t"))
+    assert connection.closed is True

@@ -15,7 +15,23 @@ The `job_context` Pytest fixture is a normal `JobRunContext`, so job tests do no
 
 ## Airflow environment
 
-Use Python 3.12 and Airflow 3.3.1 with the matching official constraints. Then set a local Airflow home and DAG folder:
+Use Python 3.12 and Airflow 3.3.1 with the matching official constraints. Install Airflow and the Standard provider in one resolver transaction, then verify both dependency metadata and the public SDK surface before running tests:
+
+```bash
+AIRFLOW_VERSION=3.3.1
+PYTHON_VERSION=3.12
+CONSTRAINT_URL="https://raw.githubusercontent.com/apache/airflow/constraints-${AIRFLOW_VERSION}/constraints-${PYTHON_VERSION}.txt"
+python -m pip install \
+  "apache-airflow==${AIRFLOW_VERSION}" \
+  apache-airflow-providers-standard \
+  --constraint "${CONSTRAINT_URL}"
+python -m pip check
+python -c "from airflow.sdk import DAG, ObjectStoragePath, task; print('airflow.sdk import smoke: OK')"
+```
+
+Do not treat an `airflow.sdk` import failure as a template test failure until `pip check` and this SDK smoke pass. A missing public symbol such as `ObjectStoragePath` indicates an inconsistent Airflow Core/Task SDK installation and should be repaired at the environment layer.
+
+Then set a local Airflow home and DAG folder:
 
 ```bash
 export AIRFLOW_HOME="$PWD/.airflow"
@@ -50,8 +66,7 @@ import pytest
 
 
 @pytest.mark.integration
-def test_real_dependency():
-    ...
+def test_real_dependency(): ...
 ```
 
 Run them intentionally:
@@ -66,7 +81,8 @@ They should not be mixed into the default unit-test gate.
 
 1. Confirm a community/official provider exists before writing a Hook/operator.
 2. Add it under `requirements/optional/` unless every job genuinely needs it.
-3. Install it using the same Airflow constraints URL as the core environment.
+3. Install it using the same Airflow constraints URL and include the exact `apache-airflow`
+   version in the same pip command so a provider install cannot silently move the core version.
 4. Keep provider-specific imports out of DAG top-level code when they are heavy/optional.
 5. Add unit tests with fakes plus marked integration tests where a real system is available.
 
@@ -115,10 +131,11 @@ Use a disposable copy. Do not bootstrap the template repository merely to test t
 1. Python 3.12;
 2. Airflow 3.3.1 installed with official constraints;
 3. provider Standard + development tooling;
-4. Ruff lint/format;
-5. Pytest + coverage/DAG integrity;
-6. secret scan;
-7. local Airflow metadata migration and DAG import smoke.
+4. `pip check` + public `airflow.sdk` import smoke;
+5. Ruff lint/format;
+6. Pytest + coverage/DAG integrity;
+7. secret scan;
+8. local Airflow metadata migration and DAG import smoke.
 
 No credential is hardcoded. Real integration jobs belong in separate environment-specific CI jobs when credentials/test systems exist.
 

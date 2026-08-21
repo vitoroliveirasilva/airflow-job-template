@@ -81,19 +81,11 @@ class HttpClient:
         """
         Perform one request, classify status codes, and decode JSON safely
 
-        Mutating methods are not considered retry-safe by default. A caller may set ``retry_safe=True`` only after making the operation idempotent (for example with a deterministic idempotency key or a verified UPSERT-like remote contract).
+        Mutating methods are not considered retry-safe by default. A caller may set ``retry_safe=True`` only after making the operation idempotent, for example with a deterministic idempotency key or a verified UPSERT-like remote contract.
         """
 
         normalized_method = method.upper().strip()
-        if normalized_method not in {
-            "GET",
-            "HEAD",
-            "POST",
-            "PUT",
-            "PATCH",
-            "DELETE",
-            "OPTIONS",
-        }:
+        if normalized_method not in {"GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"}:
             raise JobConfigurationError(f"unsupported HTTP method {method!r}")
         if not endpoint or not endpoint.strip():
             raise JobConfigurationError("endpoint cannot be blank")
@@ -121,10 +113,20 @@ class HttpClient:
                 params=dict(params or {}),
                 json=json_body,
             )
-        except RetryableJobError:
+        except (JobConfigurationError, NonRetryableJobError, RetryableJobError):
             raise
         except Exception as exc:
-            error_type = RetryableJobError if can_retry else NonRetryableJobError
+            class_names = {cls.__name__ for cls in type(exc).__mro__}
+            if "AirflowNotFoundException" in class_names:
+                raise JobConfigurationError(
+                    f"Airflow Connection {self.conn_id!r} was not found"
+                ) from exc
+            permanently_invalid = bool(
+                class_names & {"SSLError", "InvalidURL", "MissingSchema", "InvalidSchema"}
+            )
+            error_type = (
+                NonRetryableJobError if permanently_invalid or not can_retry else RetryableJobError
+            )
             raise error_type(
                 f"HTTP request failed without a response for conn_id={self.conn_id!r}; "
                 f"retry_safe={can_retry}"

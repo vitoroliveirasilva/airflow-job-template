@@ -1,9 +1,10 @@
 """Runtime context passed to normal Python job logic"""
 
+from collections.abc import Mapping
 from dataclasses import dataclass, fields
 from datetime import datetime
 from types import MappingProxyType
-from typing import Any, Mapping
+from typing import Any
 
 from .errors import JobConfigurationError
 

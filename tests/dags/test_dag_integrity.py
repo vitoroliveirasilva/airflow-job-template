@@ -2,9 +2,16 @@ from __future__ import annotations
 
 import importlib.util
 import re
+import sys
 from pathlib import Path
 
 import pytest
+
+if sys.platform == "win32":
+    pytest.skip(
+        "Airflow DAG integrity tests require a POSIX environment; use WSL2/Linux or CI",
+        allow_module_level=True,
+    )
 
 pytest.importorskip("airflow")
 

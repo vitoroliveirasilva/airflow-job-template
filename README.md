@@ -8,13 +8,12 @@ The template has three paths:
 - **Explicit Workflow**: multiple independent tasks with separate retry/timeout/observability.
 - **Isolated Job**: browser, Java, proprietary SDK, conflicting libraries, or another specialized runtime, using Airflow's native isolation mechanisms.
 
-Business logic belongs under `src/`, while DAG files remain thin and focused on orchestration.
-Store credentials in Airflow Connections or a Secrets Backend, and keep large payloads outside XCom.
+Business logic lives under `src/`; DAG files stay thin; credentials live in Airflow Connections or a Secrets Backend; large payloads live outside XCom.
 
 ## Baseline
 
 - Apache Airflow `3.3.x` (`3.3.1` is the development reference)
-- Python `3.12`
+- Python `3.12` as the development/CI baseline; Airflow 3.3.1 also supports Python 3.13 and 3.14
 - Public DAG-authoring/runtime interfaces from `airflow.sdk` where available
 - Ruff + Pytest
 - Official Airflow constraints for installation
@@ -33,17 +32,13 @@ Use lowercase slugs with letters, numbers, `_` or `-`.
 
 ## 2. Create a Python 3.12 environment
 
+Airflow is supported on POSIX systems. On Windows, use WSL2 or a Linux container rather than running the Airflow services natively in Windows PowerShell.
+
+Linux/macOS/WSL2:
+
 ```bash
 python3.12 -m venv .venv
 source .venv/bin/activate
-python -m pip install --upgrade pip
-```
-
-PowerShell:
-
-```powershell
-py -3.12 -m venv .venv
-.\.venv\Scripts\Activate.ps1
 python -m pip install --upgrade pip
 ```
 
@@ -58,33 +53,27 @@ AIRFLOW_VERSION=3.3.1
 PYTHON_VERSION=3.12
 CONSTRAINT_URL="https://raw.githubusercontent.com/apache/airflow/constraints-${AIRFLOW_VERSION}/constraints-${PYTHON_VERSION}.txt"
 
-python -m pip install "apache-airflow==${AIRFLOW_VERSION}" --constraint "${CONSTRAINT_URL}"
-python -m pip install apache-airflow-providers-standard --constraint "${CONSTRAINT_URL}"
+python -m pip install \
+  "apache-airflow==${AIRFLOW_VERSION}" \
+  apache-airflow-providers-standard \
+  --constraint "${CONSTRAINT_URL}"
 python -m pip install -r requirements/dev.txt
 python -m pip install --no-deps -e .
-```
-
-PowerShell:
-
-```powershell
-$env:AIRFLOW_VERSION = "3.3.1"
-$env:PYTHON_VERSION = "3.12"
-$constraintUrl = "https://raw.githubusercontent.com/apache/airflow/constraints-$env:AIRFLOW_VERSION/constraints-$env:PYTHON_VERSION.txt"
-
-python -m pip install "apache-airflow==$env:AIRFLOW_VERSION" --constraint $constraintUrl
-python -m pip install apache-airflow-providers-standard --constraint $constraintUrl
-python -m pip install -r requirements/dev.txt
-python -m pip install --no-deps -e .
+python -m pip check
+python -c "from airflow.sdk import DAG, ObjectStoragePath, task; print('airflow.sdk import smoke: OK')"
 ```
 
 Install providers only when a job needs them. For the API -> PostgreSQL example:
 
 ```bash
-python -m pip install -r requirements/optional/http.txt --constraint "$CONSTRAINT_URL"
-python -m pip install -r requirements/optional/postgres.txt --constraint "$CONSTRAINT_URL"
+python -m pip install "apache-airflow==$AIRFLOW_VERSION" -r requirements/optional/http.txt --constraint "$CONSTRAINT_URL"
+python -m pip install "apache-airflow==$AIRFLOW_VERSION" -r requirements/optional/postgres.txt --constraint "$CONSTRAINT_URL"
+python -m pip check
 ```
 
 `mssql.txt` is available for Microsoft SQL Server. RPA/SAP dependencies are intentionally not invented: install the concrete browser/SDK/provider required by the real runtime.
+
+Do not install `requirements/base.txt` without the matching Airflow constraints. Airflow is an application with a coordinated dependency set; an unconstrained or partially upgraded environment can leave `apache-airflow-core` and `apache-airflow-task-sdk` incompatible. If the SDK smoke above fails, rebuild the virtual environment or reinstall Airflow + the Standard provider together using the single constrained command above before debugging template code.
 
 ## 4. Create a job
 
@@ -95,6 +84,8 @@ python scripts/new_job.py customer_sync
 python scripts/new_job.py billing_pipeline --type workflow
 python scripts/new_job.py portal_update --type isolated
 ```
+
+Job names must be 2-100 character `snake_case` Python module names and cannot be reserved Python keywords such as `class`, `import`, or `async`.
 
 The default `simple` scaffold creates:
 
@@ -153,11 +144,15 @@ The factory only creates one TaskFlow task, applies `JobSpec`/`TaskPolicy`, adap
 
 ## Explicit Workflow
 
-Use explicit TaskFlow decorators or classic operators when steps require independent retries or clear visibility in the UI.
-Refer to `dags/example_workflow.py` for implementation details.
+Use explicit TaskFlow/operators when steps need independent retries or visibility.
+See `dags/example_workflow.py`.
 
 ```python
-@dag(**SPEC.as_dag_kwargs())
+dag_kwargs = SPEC.as_dag_kwargs()
+schedule = dag_kwargs.pop("schedule")
+
+
+@dag(schedule=schedule, **dag_kwargs)
 def workflow():
     extracted = extract()
     validated = validate(extracted)

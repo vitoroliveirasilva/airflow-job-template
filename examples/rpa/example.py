@@ -23,7 +23,7 @@ def update_record(
     session: PortalSession,
     diagnostic_path: Path,
 ) -> JobResult:
-    # Check state before mutation and always clean up the browser/session
+    """Check state before mutation and always clean up the browser/session"""
 
     try:
         if session.current_state(record_id) == "updated":
@@ -33,8 +33,8 @@ def update_record(
             raise RuntimeError("portal did not confirm the update")
         return JobResult(processed=1, updated=1, batch_id=context.run_id)
     except Exception:
-        # Store diagnostics only in a location appropriate for the deployment and never capture screens containing secrets/PII
-        # This path is supplied by the caller for that reason
+        # Store diagnostics only in a deployment-appropriate location. Never capture screens
+        # containing secrets/PII. This path is supplied by the caller for that reason.
         session.screenshot(diagnostic_path)
         raise
     finally:
