@@ -1,0 +1,52 @@
+name: quality
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    env:
+      AIRFLOW_VERSION: "3.3.1"
+      PYTHON_VERSION: "3.12"
+      AIRFLOW_HOME: ${{ github.workspace }}/.airflow
+      AIRFLOW__CORE__DAGS_FOLDER: ${{ github.workspace }}/dags
+      PYTHONPATH: ${{ github.workspace }}/src
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+
+      - name: Install Airflow with official constraints
+        shell: bash
+        run: |
+          python -m pip install --upgrade pip
+          CONSTRAINT_URL="https://raw.githubusercontent.com/apache/airflow/constraints-${AIRFLOW_VERSION}/constraints-${PYTHON_VERSION}.txt"
+          python -m pip install "apache-airflow==${AIRFLOW_VERSION}" --constraint "${CONSTRAINT_URL}"
+          python -m pip install apache-airflow-providers-standard --constraint "${CONSTRAINT_URL}"
+          python -m pip install -r requirements/dev.txt
+          python -m pip install --no-deps -e .
+
+      - name: Lint and format check
+        run: |
+          ruff check .
+          ruff format --check .
+
+      - name: Unit and DAG integrity tests
+        run: pytest --cov --cov-report=term-missing
+
+      - name: Secret scan
+        run: python scripts/check_secrets.py
+
+      - name: Airflow import smoke
+        shell: bash
+        run: |
+          airflow db migrate
+          airflow dags list
+          test "$(airflow dags list-import-errors --output json)" = "[]"
