@@ -21,19 +21,33 @@ class TaskPolicy:
     priority_weight: int = 1
 
     def __post_init__(self) -> None:
-        if self.retries < 0:
-            raise JobConfigurationError("TaskPolicy.retries must be >= 0")
-        if self.retry_delay < timedelta(0):
-            raise JobConfigurationError("TaskPolicy.retry_delay must be >= 0")
-        if self.execution_timeout <= timedelta(0):
-            raise JobConfigurationError("TaskPolicy.execution_timeout must be > 0")
-        if self.max_retry_delay is not None and self.max_retry_delay <= timedelta(0):
-            raise JobConfigurationError("TaskPolicy.max_retry_delay must be > 0 when set")
-        if self.priority_weight < 1:
-            raise JobConfigurationError("TaskPolicy.priority_weight must be >= 1")
+        if isinstance(self.retries, bool) or not isinstance(self.retries, int) or self.retries < 0:
+            raise JobConfigurationError("TaskPolicy.retries must be an integer >= 0")
+        if not isinstance(self.retry_delay, timedelta) or self.retry_delay < timedelta(0):
+            raise JobConfigurationError("TaskPolicy.retry_delay must be a timedelta >= 0")
+        if not isinstance(self.execution_timeout, timedelta) or self.execution_timeout <= timedelta(
+            0
+        ):
+            raise JobConfigurationError("TaskPolicy.execution_timeout must be a timedelta > 0")
+        if not isinstance(self.retry_exponential_backoff, bool):
+            raise JobConfigurationError("TaskPolicy.retry_exponential_backoff must be a boolean")
+        if self.max_retry_delay is not None and (
+            not isinstance(self.max_retry_delay, timedelta) or self.max_retry_delay <= timedelta(0)
+        ):
+            raise JobConfigurationError(
+                "TaskPolicy.max_retry_delay must be a timedelta > 0 when set"
+            )
+        if (
+            isinstance(self.priority_weight, bool)
+            or not isinstance(self.priority_weight, int)
+            or self.priority_weight < 1
+        ):
+            raise JobConfigurationError("TaskPolicy.priority_weight must be an integer >= 1")
         for field_name, value in (("pool", self.pool), ("queue", self.queue)):
-            if value is not None and not value.strip():
-                raise JobConfigurationError(f"TaskPolicy.{field_name} cannot be blank")
+            if value is not None and (not isinstance(value, str) or not value.strip()):
+                raise JobConfigurationError(
+                    f"TaskPolicy.{field_name} must be a non-blank string when set"
+                )
 
     def as_task_kwargs(self) -> dict[str, Any]:
         """Return TaskFlow/operator kwargs without meaningless ``None`` values"""

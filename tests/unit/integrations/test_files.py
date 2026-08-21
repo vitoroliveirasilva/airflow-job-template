@@ -19,3 +19,17 @@ def test_atomic_write_and_checksum(tmp_path: Path) -> None:
     path = atomic_write_text(tmp_path / "report.txt", "hello")
     assert path.read_text(encoding="utf-8") == "hello"
     assert sha256_file(path) == "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"
+
+
+def test_safe_filename_rejects_invalid_runtime_types() -> None:
+    with pytest.raises(JobConfigurationError):
+        safe_filename(123)
+    with pytest.raises(JobConfigurationError, match="max_length"):
+        safe_filename("report.csv", max_length=True)
+
+
+def test_sha256_rejects_boolean_chunk_size(tmp_path: Path) -> None:
+    path = tmp_path / "payload.bin"
+    path.write_bytes(b"abc")
+    with pytest.raises(ValueError, match="integer"):
+        sha256_file(path, chunk_size=True)

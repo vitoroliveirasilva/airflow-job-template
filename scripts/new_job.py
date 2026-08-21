@@ -14,6 +14,7 @@ from pathlib import Path
 
 TOOL_NAME = "airflow-job-template"
 JOB_RE = re.compile(r"^[a-z][a-z0-9_]{1,99}$")
+PACKAGE_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 
 class ScaffoldError(RuntimeError):
@@ -33,13 +34,27 @@ def _state(root: Path) -> tuple[str, bool]:
     pyproject = root / "pyproject.toml"
     if not pyproject.is_file():
         raise ScaffoldError("pyproject.toml not found; run from the repository root")
-    with pyproject.open("rb") as handle:
-        data = tomllib.load(handle)
+    try:
+        with pyproject.open("rb") as handle:
+            data = tomllib.load(handle)
+    except (OSError, tomllib.TOMLDecodeError) as exc:
+        raise ScaffoldError(f"cannot read valid pyproject.toml: {exc}") from exc
     try:
         config = data["tool"][TOOL_NAME]
-        return str(config["package"]), bool(config["bootstrapped"])
+        package = config["package"]
+        bootstrapped = config["bootstrapped"]
     except (KeyError, TypeError) as exc:
         raise ScaffoldError(f"missing [tool.{TOOL_NAME}] configuration") from exc
+
+    if (
+        not isinstance(package, str)
+        or not PACKAGE_RE.fullmatch(package)
+        or keyword.iskeyword(package)
+    ):
+        raise ScaffoldError("configured package must be a valid Python package identifier")
+    if not isinstance(bootstrapped, bool):
+        raise ScaffoldError("configured bootstrapped flag must be a boolean")
+    return package, bootstrapped
 
 
 def _atomic_create(path: Path, content: str) -> None:
@@ -277,11 +292,16 @@ def create_job(root: Path, name: str, job_type: str) -> list[Path]:
     package, bootstrapped = _state(root)
     if not bootstrapped:
         raise ScaffoldError("run scripts/bootstrap_project.py before creating jobs")
-    package_dir = root / "src" / package
-    if not package_dir.is_dir():
-        raise ScaffoldError(f"configured package directory does not exist: {package_dir}")
+    source_root = (root / "src").resolve()
+    package_dir = (source_root / package).resolve()
+    if package_dir.parent != source_root or not package_dir.is_dir():
+        raise ScaffoldError("configured package directory must be a direct child of src/")
 
     planned = build_files(package, name, job_type)
+    for relative in planned:
+        destination = (root / relative).resolve()
+        if not destination.is_relative_to(root):
+            raise ScaffoldError(f"generated path escapes repository root: {relative}")
     existing = [root / relative for relative in planned if (root / relative).exists()]
     if existing:
         joined = ", ".join(str(path.relative_to(root)) for path in existing)

@@ -1,6 +1,9 @@
 from dataclasses import replace
 
+import pytest
+
 from airflow_job_template.jobs.example_api_to_database import run
+from airflow_job_template.runtime import JobConfigurationError
 
 
 class Http:
@@ -37,3 +40,17 @@ def test_api_to_database_dry_run_does_not_write(job_context) -> None:
     result = run(context, http_client=Http(), database_client=database)
     assert result.processed == 2
     assert database.batches == []
+
+
+@pytest.mark.parametrize(
+    "params",
+    [
+        {"batch_size": 3.5, "dry_run": True},
+        {"batch_size": True, "dry_run": True},
+        {"batch_size": 100, "dry_run": "false"},
+    ],
+)
+def test_job_rejects_unvalidated_runtime_param_types(job_context, params) -> None:
+    context = replace(job_context, params=params)
+    with pytest.raises(JobConfigurationError):
+        run(context, http_client=Http(), database_client=Database())

@@ -36,3 +36,20 @@ def test_task_policy_keeps_optional_pool_and_queue_explicit() -> None:
 def test_task_policy_rejects_invalid_values(kwargs: dict) -> None:
     with pytest.raises(JobConfigurationError):
         TaskPolicy(**kwargs)
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"retries": True},
+        {"retry_delay": 5},
+        {"execution_timeout": 30},
+        {"retry_exponential_backoff": 1},
+        {"max_retry_delay": 30},
+        {"priority_weight": True},
+        {"queue": 123},
+    ],
+)
+def test_task_policy_rejects_wrong_runtime_types(kwargs: dict) -> None:
+    with pytest.raises(JobConfigurationError):
+        TaskPolicy(**kwargs)

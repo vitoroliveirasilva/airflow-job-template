@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable, Iterable, Iterator, Sequence
 from contextlib import contextmanager
 from typing import Any, Protocol
@@ -77,8 +78,10 @@ class DatabaseClient:
     """DB-API operations with explicit transaction boundaries and bounded fetching"""
 
     def __init__(self, conn_id: str, *, hook_factory: HookFactory | None = None) -> None:
-        if not conn_id.strip():
-            raise JobConfigurationError("conn_id cannot be blank")
+        if not isinstance(conn_id, str) or not conn_id.strip():
+            raise JobConfigurationError("conn_id must be a non-blank string")
+        if hook_factory is not None and not callable(hook_factory):
+            raise JobConfigurationError("hook_factory must be callable")
         self.conn_id = conn_id
         self._hook_factory = hook_factory or _default_hook_factory
 
@@ -89,30 +92,66 @@ class DatabaseClient:
 
     @contextmanager
     def connection(self) -> Iterator[_Connection]:
-        """Yield a connection and commit/rollback exactly once around the caller's work"""
+        """Yield a transaction while preserving the primary failure during cleanup"""
 
         connection = self.get_hook().get_conn()
+        failed = False
         try:
             yield connection
             connection.commit()
-        except Exception:
-            connection.rollback()
+        except BaseException:
+            failed = True
+            try:
+                connection.rollback()
+            except Exception:
+                logging.getLogger(__name__).warning(
+                    "database rollback failed for conn_id=%r; preserving primary failure",
+                    self.conn_id,
+                )
             raise
         finally:
-            connection.close()
+            try:
+                connection.close()
+            except Exception:
+                detail = "preserving primary failure" if failed else "commit already completed"
+                logging.getLogger(__name__).warning(
+                    "database close failed for conn_id=%r; %s",
+                    self.conn_id,
+                    detail,
+                )
+
+    @contextmanager
+    def _cursor(self, connection: _Connection) -> Iterator[_Cursor]:
+        """Scope a cursor without letting cleanup hide the operation that failed"""
+
+        cursor = connection.cursor()
+        failed = False
+        try:
+            yield cursor
+        except BaseException:
+            failed = True
+            raise
+        finally:
+            try:
+                cursor.close()
+            except Exception as exc:
+                if not failed:
+                    raise RetryableJobError(
+                        f"database cursor cleanup failed for conn_id={self.conn_id!r}"
+                    ) from exc
+                logging.getLogger(__name__).warning(
+                    "database cursor cleanup failed for conn_id=%r; preserving primary failure",
+                    self.conn_id,
+                )
 
     def execute(self, sql: str, parameters: Any = None) -> None:
         """Execute one parameterized statement inside a transaction"""
 
-        if not sql.strip():
-            raise JobConfigurationError("sql cannot be blank")
+        if not isinstance(sql, str) or not sql.strip():
+            raise JobConfigurationError("sql must be a non-blank string")
         try:
-            with self.connection() as connection:
-                cursor = connection.cursor()
-                try:
-                    cursor.execute(sql, parameters)
-                finally:
-                    cursor.close()
+            with self.connection() as connection, self._cursor(connection) as cursor:
+                cursor.execute(sql, parameters)
         except JobConfigurationError:
             raise
         except Exception as exc:
@@ -127,21 +166,17 @@ class DatabaseClient:
     ) -> int:
         """Batch many parameter sets in one transaction without materializing the whole input"""
 
-        if not sql.strip():
-            raise JobConfigurationError("sql cannot be blank")
-        if chunk_size < 1:
-            raise JobConfigurationError("chunk_size must be >= 1")
+        if not isinstance(sql, str) or not sql.strip():
+            raise JobConfigurationError("sql must be a non-blank string")
+        if isinstance(chunk_size, bool) or not isinstance(chunk_size, int) or chunk_size < 1:
+            raise JobConfigurationError("chunk_size must be an integer >= 1")
 
         processed = 0
         try:
-            with self.connection() as connection:
-                cursor = connection.cursor()
-                try:
-                    for batch in _batched(rows, chunk_size):
-                        cursor.executemany(sql, batch)
-                        processed += len(batch)
-                finally:
-                    cursor.close()
+            with self.connection() as connection, self._cursor(connection) as cursor:
+                for batch in _batched(rows, chunk_size):
+                    cursor.executemany(sql, batch)
+                    processed += len(batch)
         except JobConfigurationError:
             raise
         except Exception as exc:
@@ -157,35 +192,44 @@ class DatabaseClient:
     ) -> Iterator[Any]:
         """Stream rows in bounded batches while keeping the connection scoped to iteration"""
 
-        if not sql.strip():
-            raise JobConfigurationError("sql cannot be blank")
-        if fetch_size < 1:
-            raise JobConfigurationError("fetch_size must be >= 1")
+        if not isinstance(sql, str) or not sql.strip():
+            raise JobConfigurationError("sql must be a non-blank string")
+        if isinstance(fetch_size, bool) or not isinstance(fetch_size, int) or fetch_size < 1:
+            raise JobConfigurationError("fetch_size must be an integer >= 1")
 
         connection: _Connection | None = None
-        cursor: _Cursor | None = None
+        failed = False
         try:
             connection = self.get_hook().get_conn()
-            cursor = connection.cursor()
-            cursor.execute(sql, parameters)
-            while True:
-                rows = cursor.fetchmany(fetch_size)
-                if not rows:
-                    break
-                yield from rows
+            with self._cursor(connection) as cursor:
+                cursor.execute(sql, parameters)
+                while True:
+                    rows = cursor.fetchmany(fetch_size)
+                    if not rows:
+                        break
+                    yield from rows
         except JobConfigurationError:
+            failed = True
             raise
         except Exception as exc:
+            failed = True
             _raise_db_error(exc, operation="fetch", conn_id=self.conn_id)
+        except BaseException:
+            failed = True
+            raise
         finally:
-            if cursor is not None:
+            if connection is not None:
                 try:
-                    cursor.close()
-                finally:
-                    if connection is not None:
-                        connection.close()
-            elif connection is not None:
-                connection.close()
+                    connection.close()
+                except Exception as exc:
+                    if not failed:
+                        raise RetryableJobError(
+                            f"database stream cleanup failed for conn_id={self.conn_id!r}"
+                        ) from exc
+                    logging.getLogger(__name__).warning(
+                        "database stream cleanup failed for conn_id=%r; preserving primary failure",
+                        self.conn_id,
+                    )
 
     def fetch_all(
         self,
@@ -197,8 +241,8 @@ class DatabaseClient:
     ) -> list[Any]:
         """Collect a deliberately bounded result set for genuinely small queries"""
 
-        if max_rows < 1:
-            raise JobConfigurationError("max_rows must be >= 1")
+        if isinstance(max_rows, bool) or not isinstance(max_rows, int) or max_rows < 1:
+            raise JobConfigurationError("max_rows must be an integer >= 1")
         result: list[Any] = []
         for row in self.iter_rows(sql, parameters, fetch_size=fetch_size):
             result.append(row)

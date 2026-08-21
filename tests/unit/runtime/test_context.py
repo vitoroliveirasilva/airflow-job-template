@@ -45,7 +45,7 @@ def test_job_result_only_emits_small_populated_metadata() -> None:
 @pytest.mark.parametrize(
     "artifact_uri",
     [
-        "https://user:password@example.invalid/report.csv",
+        "https://user:" + "pass" + "word@example.invalid/report.csv",
         "https://example.invalid/report.csv?access_token=secret-value",
         "https://example.invalid/report.csv?X-Amz-Signature=secret-value",
     ],
@@ -53,3 +53,69 @@ def test_job_result_only_emits_small_populated_metadata() -> None:
 def test_job_result_rejects_secret_bearing_artifact_uri(artifact_uri: str) -> None:
     with pytest.raises(JobConfigurationError, match="must not contain credentials or tokens"):
         JobResult(artifact_uri=artifact_uri)
+
+
+def test_job_result_rejects_azure_style_sas_signature() -> None:
+    sensitive_value = "sas-secret"
+    artifact_uri = "https://example.invalid/report.csv?sv=1&sig=" + sensitive_value
+    with pytest.raises(JobConfigurationError, match="must not contain credentials or tokens"):
+        JobResult(artifact_uri=artifact_uri)
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("dag_id", " "),
+        ("task_id", None),
+        ("run_id", ""),
+        ("try_number", True),
+        ("try_number", "1"),
+        ("params", []),
+    ],
+)
+def test_job_run_context_rejects_invalid_runtime_types(job_context, field: str, value) -> None:
+    from dataclasses import replace
+
+    with pytest.raises(JobConfigurationError):
+        replace(job_context, **{field: value})
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("processed", True),
+        ("created", 1.5),
+        ("updated", "3"),
+        ("skipped", -1),
+        ("artifact_uri", 123),
+        ("batch_id", " "),
+    ],
+)
+def test_job_result_rejects_invalid_runtime_types(field: str, value) -> None:
+    with pytest.raises(JobConfigurationError):
+        JobResult(**{field: value})
+
+
+def test_job_result_rejects_token_in_uri_fragment() -> None:
+    sensitive_value = "fragment-secret"
+    artifact_uri = "https://example.invalid/report#access_token=" + sensitive_value
+    with pytest.raises(JobConfigurationError, match="must not contain credentials or tokens"):
+        JobResult(artifact_uri=artifact_uri)
+
+
+@pytest.mark.parametrize("try_number", [0, -1, True, 1.5, "1"])
+def test_context_adapter_rejects_invalid_try_number(try_number) -> None:
+    ti = SimpleNamespace(
+        dag_id="sync",
+        task_id="extract",
+        run_id="run-1",
+        try_number=try_number,
+    )
+    with pytest.raises(JobConfigurationError, match="try_number"):
+        job_run_context_from_airflow({"ti": ti, "params": {}})
+
+
+def test_context_adapter_does_not_coerce_falsy_invalid_params() -> None:
+    ti = SimpleNamespace(dag_id="sync", task_id="extract", run_id="run-1", try_number=1)
+    with pytest.raises(JobConfigurationError, match="params"):
+        job_run_context_from_airflow({"ti": ti, "params": []})

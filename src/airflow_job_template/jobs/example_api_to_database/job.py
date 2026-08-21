@@ -41,10 +41,14 @@ def run(
 ) -> JobResult:
     """Fetch pages and upsert batches; no network or DB work occurs during DAG parsing"""
 
-    batch_size = int(context.params.get("batch_size", 500))
-    dry_run = bool(context.params.get("dry_run", False))
+    batch_size = context.params.get("batch_size", 500)
+    dry_run = context.params.get("dry_run", False)
+    if isinstance(batch_size, bool) or not isinstance(batch_size, int):
+        raise JobConfigurationError("batch_size must be an integer")
     if not 1 <= batch_size <= 5_000:
         raise JobConfigurationError("batch_size must be between 1 and 5000")
+    if not isinstance(dry_run, bool):
+        raise JobConfigurationError("dry_run must be a boolean")
 
     http = http_client or HttpClient(CRM_API_CONN_ID)
     database = database_client or DatabaseClient(TARGET_DB_CONN_ID)

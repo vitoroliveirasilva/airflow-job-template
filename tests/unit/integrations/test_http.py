@@ -1,7 +1,11 @@
 import pytest
 
 from airflow_job_template.integrations.http import HttpClient, HttpTimeout
-from airflow_job_template.runtime import NonRetryableJobError, RetryableJobError
+from airflow_job_template.runtime import (
+    JobConfigurationError,
+    NonRetryableJobError,
+    RetryableJobError,
+)
 
 
 class Response:
@@ -104,8 +108,6 @@ def test_missing_airflow_connection_fails_fast_without_retry() -> None:
         "missing_api",
         hook_factory=lambda _conn_id, _method: MissingConnectionHook(),
     )
-    from airflow_job_template.runtime import JobConfigurationError
-
     with pytest.raises(JobConfigurationError, match="missing_api"):
         client.request_json("GET", "/customers")
 
@@ -123,4 +125,71 @@ def test_tls_verification_failure_is_not_retried() -> None:
         hook_factory=lambda _conn_id, _method: TlsFailureHook(),
     )
     with pytest.raises(NonRetryableJobError):
+        client.request_json("GET", "/customers")
+
+
+def test_timeout_rejects_nan_and_non_numeric_values() -> None:
+    with pytest.raises(JobConfigurationError, match="finite number"):
+        HttpTimeout(float("nan"), 1)
+    with pytest.raises(JobConfigurationError, match="finite number"):
+        HttpTimeout("5", 1)
+
+
+@pytest.mark.parametrize(("method", "status"), [("HEAD", 200), ("GET", 204), ("POST", 205)])
+def test_success_without_response_body_returns_none(method: str, status: int) -> None:
+    class EmptyResponse:
+        status_code = status
+
+        def json(self):
+            raise AssertionError("json() must not be called when the response has no body")
+
+    client = HttpClient(
+        "crm_api",
+        hook_factory=lambda _conn_id, _method: Hook([EmptyResponse()]),
+    )
+    assert client.request_json(method, "/resource", retry_safe=False) is None
+
+
+def test_invalid_hook_status_is_non_retryable() -> None:
+    client = HttpClient(
+        "crm_api",
+        hook_factory=lambda _conn_id, _method: Hook([Response("not-a-status", {})]),
+    )
+    with pytest.raises(NonRetryableJobError, match="invalid status"):
+        client.request_json("GET", "/customers")
+
+
+def test_pagination_rejects_ambiguous_parameter_names() -> None:
+    client = HttpClient("crm_api", hook_factory=lambda _conn_id, _method: Hook([]))
+    with pytest.raises(JobConfigurationError, match="must be different"):
+        list(
+            client.iter_offset_items(
+                "/customers",
+                item_key="items",
+                page_param="page",
+                page_size_param="page",
+            )
+        )
+
+
+def test_request_rejects_absolute_or_ambiguous_payload_configuration() -> None:
+    client = HttpClient("crm", hook_factory=lambda _conn_id, _method: Hook(Response(200, {})))
+
+    with pytest.raises(JobConfigurationError, match="relative"):
+        client.request_json("GET", "https://other.invalid/customers")
+    with pytest.raises(JobConfigurationError, match="relative"):
+        client.request_json("GET", "//other.invalid/customers")
+    with pytest.raises(JobConfigurationError, match="whitespace"):
+        client.request_json("GET", " /customers ")
+    with pytest.raises(JobConfigurationError, match="either data or json_body"):
+        client.request_json("POST", "/customers", data="payload", json_body={"id": 1})
+
+
+@pytest.mark.parametrize("status", [100, 101, 301, 302, 304, 399])
+def test_unexpected_informational_or_redirect_status_is_non_retryable(status: int) -> None:
+    client = HttpClient(
+        "crm",
+        hook_factory=lambda _conn_id, _method: Hook([Response(status, {})]),
+    )
+    with pytest.raises(NonRetryableJobError, match="unexpected HTTP status"):
         client.request_json("GET", "/customers")

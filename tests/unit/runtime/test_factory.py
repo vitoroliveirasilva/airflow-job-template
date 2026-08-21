@@ -26,3 +26,22 @@ def test_single_task_factory_applies_spec_and_policy() -> None:
     task = dag.task_dict["execute"]
     assert task.retries == spec.task_policy.retries
     assert task.execution_timeout == spec.task_policy.execution_timeout
+
+
+def test_single_task_factory_rejects_conflicting_task_id_override() -> None:
+    spec = JobSpec(dag_id="factory_override_test", description="Factory test")
+
+    with pytest.raises(ValueError, match="dedicated task_id"):
+        build_single_task_dag(
+            spec=spec,
+            job_callable=lambda _context: None,
+            task_overrides={"task_id": "other"},
+        )
+
+
+def test_single_task_factory_validates_public_arguments() -> None:
+    spec = JobSpec(dag_id="factory_validation_test", description="Factory test")
+    with pytest.raises(TypeError, match="job_callable"):
+        build_single_task_dag(spec=spec, job_callable=None)
+    with pytest.raises(ValueError, match="non-blank"):
+        build_single_task_dag(spec=spec, job_callable=lambda _context: None, task_id=" ")

@@ -137,3 +137,115 @@ def test_iter_rows_closes_connection_when_cursor_creation_fails() -> None:
     with pytest.raises(NonRetryableJobError):
         list(client.iter_rows("SELECT id FROM t"))
     assert connection.closed is True
+
+
+def test_database_client_rejects_invalid_runtime_configuration() -> None:
+    with pytest.raises(JobConfigurationError, match="conn_id"):
+        DatabaseClient(None)
+    with pytest.raises(JobConfigurationError, match="hook_factory"):
+        DatabaseClient("db", hook_factory="not-callable")
+
+
+def test_database_methods_reject_boolean_sizes() -> None:
+    client = DatabaseClient("db", hook_factory=lambda _conn_id: Hook(Connection(Cursor())))
+    with pytest.raises(JobConfigurationError, match="chunk_size"):
+        client.executemany("INSERT INTO t VALUES (%s)", [], chunk_size=True)
+    with pytest.raises(JobConfigurationError, match="fetch_size"):
+        list(client.iter_rows("SELECT 1", fetch_size=True))
+    with pytest.raises(JobConfigurationError, match="max_rows"):
+        client.fetch_all("SELECT 1", max_rows=True)
+
+
+def test_rollback_failure_does_not_mask_primary_database_error() -> None:
+    class RollbackFailureConnection(Connection):
+        def rollback(self):
+            self.rolled_back = True
+            raise RuntimeError("rollback cleanup failed")
+
+    cursor = Cursor(fail_execute=True, failure_type=OperationalError)
+    connection = RollbackFailureConnection(cursor)
+    client = DatabaseClient("target_db", hook_factory=lambda _conn_id: Hook(connection))
+
+    with pytest.raises(RetryableJobError) as exc_info:
+        client.execute("UPDATE t SET value=%s", (1,))
+
+    assert isinstance(exc_info.value.__cause__, OperationalError)
+    assert connection.rolled_back is True
+    assert connection.closed is True
+
+
+def test_close_failure_does_not_mask_primary_database_error() -> None:
+    class CloseFailureConnection(Connection):
+        def close(self):
+            self.closed = True
+            raise RuntimeError("close cleanup failed")
+
+    cursor = Cursor(fail_execute=True, failure_type=ProgrammingError)
+    connection = CloseFailureConnection(cursor)
+    client = DatabaseClient("target_db", hook_factory=lambda _conn_id: Hook(connection))
+
+    with pytest.raises(NonRetryableJobError) as exc_info:
+        client.execute("BROKEN SQL")
+
+    assert isinstance(exc_info.value.__cause__, ProgrammingError)
+    assert connection.closed is True
+
+
+def test_close_failure_after_success_does_not_retry_committed_write() -> None:
+    class CloseFailureConnection(Connection):
+        def close(self):
+            self.closed = True
+            raise RuntimeError("close cleanup failed")
+
+    cursor = Cursor()
+    connection = CloseFailureConnection(cursor)
+    client = DatabaseClient("target_db", hook_factory=lambda _conn_id: Hook(connection))
+
+    client.execute("UPDATE t SET value=%s", (1,))
+
+    assert connection.committed is True
+    assert connection.closed is True
+
+
+def test_cursor_cleanup_failure_rolls_back_before_retry() -> None:
+    class CloseFailureCursor(Cursor):
+        def close(self):
+            self.closed = True
+            raise RuntimeError("cursor cleanup failed")
+
+    cursor = CloseFailureCursor()
+    connection = Connection(cursor)
+    client = DatabaseClient("target_db", hook_factory=lambda _conn_id: Hook(connection))
+
+    with pytest.raises(RetryableJobError, match="cursor cleanup"):
+        client.execute("UPDATE t SET value=%s", (1,))
+
+    assert connection.rolled_back is True
+    assert connection.committed is False
+    assert connection.closed is True
+
+
+def test_stream_cleanup_failure_does_not_mask_fetch_error() -> None:
+    class FetchFailureCursor(Cursor):
+        def fetchmany(self, size):
+            raise OperationalError("fetch failed")
+
+        def close(self):
+            self.closed = True
+            raise RuntimeError("cursor cleanup failed")
+
+    class CloseFailureConnection(Connection):
+        def close(self):
+            self.closed = True
+            raise RuntimeError("connection cleanup failed")
+
+    cursor = FetchFailureCursor()
+    connection = CloseFailureConnection(cursor)
+    client = DatabaseClient("source_db", hook_factory=lambda _conn_id: Hook(connection))
+
+    with pytest.raises(RetryableJobError) as exc_info:
+        list(client.iter_rows("SELECT id FROM t"))
+
+    assert isinstance(exc_info.value.__cause__, OperationalError)
+    assert cursor.closed is True
+    assert connection.closed is True

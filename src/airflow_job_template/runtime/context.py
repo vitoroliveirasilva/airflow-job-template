@@ -5,34 +5,10 @@ from dataclasses import dataclass, fields
 from datetime import datetime
 from types import MappingProxyType
 from typing import Any
-from urllib.parse import parse_qsl, urlsplit
+
+from airflow_job_template._security import contains_sensitive_uri_data
 
 from .errors import JobConfigurationError
-
-_SENSITIVE_URI_QUERY_FRAGMENTS = (
-    "api_key",
-    "apikey",
-    "credential",
-    "password",
-    "secret",
-    "signature",
-    "token",
-)
-
-
-def _artifact_uri_contains_secret(uri: str) -> bool:
-    """Detect credential-bearing URIs that must never be emitted through XCom"""
-
-    try:
-        parsed = urlsplit(uri)
-    except ValueError:
-        return True
-    if parsed.username is not None or parsed.password is not None:
-        return True
-    return any(
-        any(fragment in key.lower() for fragment in _SENSITIVE_URI_QUERY_FRAGMENTS)
-        for key, _value in parse_qsl(parsed.query, keep_blank_values=True)
-    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -49,11 +25,21 @@ class JobRunContext:
     params: Mapping[str, Any]
 
     def __post_init__(self) -> None:
-        object.__setattr__(self, "params", MappingProxyType(dict(self.params)))
-        if not self.dag_id or not self.task_id or not self.run_id:
-            raise JobConfigurationError("dag_id, task_id and run_id are required at runtime")
+        for name in ("dag_id", "task_id", "run_id"):
+            value = getattr(self, name)
+            if not isinstance(value, str) or not value.strip():
+                raise JobConfigurationError(f"{name} must be a non-blank string at runtime")
+        if isinstance(self.try_number, bool) or not isinstance(self.try_number, int):
+            raise JobConfigurationError("try_number must be an integer >= 1")
         if self.try_number < 1:
             raise JobConfigurationError("try_number must be >= 1")
+        for name in ("logical_date", "data_interval_start", "data_interval_end"):
+            value = getattr(self, name)
+            if value is not None and not isinstance(value, datetime):
+                raise JobConfigurationError(f"{name} must be a datetime or None")
+        if not isinstance(self.params, Mapping):
+            raise JobConfigurationError("params must be a mapping at runtime")
+        object.__setattr__(self, "params", MappingProxyType(dict(self.params)))
 
 
 @dataclass(frozen=True, slots=True)
@@ -70,13 +56,15 @@ class JobResult:
     def __post_init__(self) -> None:
         for name in ("processed", "created", "updated", "skipped"):
             value = getattr(self, name)
-            if value is not None and value < 0:
-                raise JobConfigurationError(f"JobResult.{name} must be >= 0")
+            if value is not None and (
+                isinstance(value, bool) or not isinstance(value, int) or value < 0
+            ):
+                raise JobConfigurationError(f"JobResult.{name} must be an integer >= 0 when set")
         for name in ("artifact_uri", "batch_id"):
             value = getattr(self, name)
-            if value is not None and not value.strip():
-                raise JobConfigurationError(f"JobResult.{name} cannot be blank")
-        if self.artifact_uri is not None and _artifact_uri_contains_secret(self.artifact_uri):
+            if value is not None and (not isinstance(value, str) or not value.strip()):
+                raise JobConfigurationError(f"JobResult.{name} must be a non-blank string when set")
+        if self.artifact_uri is not None and contains_sensitive_uri_data(self.artifact_uri):
             raise JobConfigurationError(
                 "JobResult.artifact_uri must not contain credentials or tokens"
             )
@@ -111,12 +99,20 @@ def job_run_context_from_airflow(context: Mapping[str, Any]) -> JobRunContext:
     dag_id = _value(dag, "dag_id") or _value(ti, "dag_id") or context.get("dag_id")
     task_id = _value(task, "task_id") or _value(ti, "task_id") or context.get("task_id")
     run_id = _value(dag_run, "run_id") or _value(ti, "run_id") or context.get("run_id")
-    try_number = _value(ti, "try_number") or context.get("try_number") or 1
+    try_number = _value(ti, "try_number")
+    if try_number is None:
+        try_number = context.get("try_number")
+    if try_number is None:
+        try_number = 1
 
-    if not all(isinstance(value, str) and value for value in (dag_id, task_id, run_id)):
+    if not all(isinstance(value, str) and value.strip() for value in (dag_id, task_id, run_id)):
         raise JobConfigurationError("Airflow context is missing dag_id, task_id or run_id")
+    if isinstance(try_number, bool) or not isinstance(try_number, int) or try_number < 1:
+        raise JobConfigurationError("Airflow context try_number must be an integer >= 1")
 
-    params = context.get("params") or {}
+    params = context.get("params")
+    if params is None:
+        params = {}
     if not isinstance(params, Mapping):
         raise JobConfigurationError("Airflow context params must be a mapping")
 
@@ -124,7 +120,7 @@ def job_run_context_from_airflow(context: Mapping[str, Any]) -> JobRunContext:
         dag_id=dag_id,
         task_id=task_id,
         run_id=run_id,
-        try_number=int(try_number),
+        try_number=try_number,
         logical_date=context.get("logical_date") or _value(dag_run, "logical_date"),
         data_interval_start=context.get("data_interval_start"),
         data_interval_end=context.get("data_interval_end"),

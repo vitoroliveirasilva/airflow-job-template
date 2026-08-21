@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import math
 from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass
+from numbers import Real
 from typing import Any, Protocol
+from urllib.parse import urlsplit
 
 from airflow_job_template.runtime.errors import (
     JobConfigurationError,
@@ -26,6 +29,15 @@ class _HttpHook(Protocol):
 HookFactory = Callable[[str, str], _HttpHook]
 
 
+def _positive_finite_seconds(value: float, *, name: str) -> float:
+    if isinstance(value, bool) or not isinstance(value, Real):
+        raise JobConfigurationError(f"HTTP {name} timeout must be a finite number > 0")
+    normalized = float(value)
+    if not math.isfinite(normalized) or normalized <= 0:
+        raise JobConfigurationError(f"HTTP {name} timeout must be a finite number > 0")
+    return normalized
+
+
 @dataclass(frozen=True, slots=True)
 class HttpTimeout:
     """Explicit connect/read timeout pair passed to ``requests`` via HttpHook"""
@@ -34,8 +46,16 @@ class HttpTimeout:
     read_seconds: float = 30.0
 
     def __post_init__(self) -> None:
-        if self.connect_seconds <= 0 or self.read_seconds <= 0:
-            raise JobConfigurationError("HTTP timeouts must be > 0")
+        object.__setattr__(
+            self,
+            "connect_seconds",
+            _positive_finite_seconds(self.connect_seconds, name="connect"),
+        )
+        object.__setattr__(
+            self,
+            "read_seconds",
+            _positive_finite_seconds(self.read_seconds, name="read"),
+        )
 
     def as_requests_timeout(self) -> tuple[float, float]:
         return (self.connect_seconds, self.read_seconds)
@@ -61,8 +81,12 @@ class HttpClient:
         timeout: HttpTimeout | None = None,
         hook_factory: HookFactory | None = None,
     ) -> None:
-        if not conn_id.strip():
-            raise JobConfigurationError("conn_id cannot be blank")
+        if not isinstance(conn_id, str) or not conn_id.strip():
+            raise JobConfigurationError("conn_id must be a non-blank string")
+        if timeout is not None and not isinstance(timeout, HttpTimeout):
+            raise JobConfigurationError("timeout must be an HttpTimeout")
+        if hook_factory is not None and not callable(hook_factory):
+            raise JobConfigurationError("hook_factory must be callable")
         self.conn_id = conn_id
         self.timeout = timeout or HttpTimeout()
         self._hook_factory = hook_factory or _default_hook_factory
@@ -80,15 +104,33 @@ class HttpClient:
     ) -> Any:
         """Perform one request, classify status codes, and decode JSON safely.
 
-        Mutating methods are not retry-safe by default. Set ``retry_safe=True`` only after the
-        operation is idempotent, for example via an idempotency key or a verified remote contract.
+        Mutating methods are not considered retry-safe by default. A caller may set
+        ``retry_safe=True`` only after making the operation idempotent, for example with a
+        deterministic idempotency key or a verified UPSERT-like remote contract.
         """
 
+        if not isinstance(method, str):
+            raise JobConfigurationError("HTTP method must be a string")
         normalized_method = method.upper().strip()
         if normalized_method not in {"GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"}:
             raise JobConfigurationError(f"unsupported HTTP method {method!r}")
-        if not endpoint or not endpoint.strip():
-            raise JobConfigurationError("endpoint cannot be blank")
+        if not isinstance(endpoint, str) or not endpoint.strip():
+            raise JobConfigurationError("endpoint must be a non-blank string")
+        if endpoint != endpoint.strip():
+            raise JobConfigurationError("endpoint must not contain surrounding whitespace")
+        parsed_endpoint = urlsplit(endpoint)
+        if parsed_endpoint.scheme or parsed_endpoint.netloc:
+            raise JobConfigurationError(
+                "endpoint must be relative; configure the host in the Airflow Connection"
+            )
+        if data is not None and json_body is not None:
+            raise JobConfigurationError("set either data or json_body, not both")
+        if params is not None and not isinstance(params, Mapping):
+            raise JobConfigurationError("params must be a mapping when set")
+        if headers is not None and not isinstance(headers, Mapping):
+            raise JobConfigurationError("headers must be a mapping when set")
+        if retry_safe is not None and not isinstance(retry_safe, bool):
+            raise JobConfigurationError("retry_safe must be a boolean or None")
 
         can_retry = (
             retry_safe
@@ -132,7 +174,16 @@ class HttpClient:
                 f"retry_safe={can_retry}"
             ) from exc
 
-        status = int(response.status_code)
+        try:
+            status = int(response.status_code)
+        except (AttributeError, TypeError, ValueError) as exc:
+            raise NonRetryableJobError(
+                f"HTTP hook returned an invalid status for conn_id={self.conn_id!r}"
+            ) from exc
+        if not 100 <= status <= 599:
+            raise NonRetryableJobError(
+                f"HTTP hook returned out-of-range status {status} for conn_id={self.conn_id!r}"
+            )
         if status in {408, 425, 429} or 500 <= status <= 599:
             error_type = RetryableJobError if can_retry else NonRetryableJobError
             raise error_type(
@@ -143,6 +194,12 @@ class HttpClient:
             raise NonRetryableJobError(
                 f"non-retryable HTTP status {status} for conn_id={self.conn_id!r}"
             )
+        if status < 200 or 300 <= status <= 399:
+            raise NonRetryableJobError(
+                f"unexpected HTTP status {status} for conn_id={self.conn_id!r}"
+            )
+        if normalized_method == "HEAD" or status in {204, 205}:
+            return None
         try:
             return response.json()
         except (TypeError, ValueError) as exc:
@@ -164,10 +221,24 @@ class HttpClient:
     ) -> Iterator[Any]:
         """Iterate a common page/page-size API without pretending all APIs paginate alike"""
 
-        if page_size < 1 or start_page < 1 or max_pages < 1:
-            raise JobConfigurationError("page_size, start_page and max_pages must be >= 1")
-        if not item_key.strip():
-            raise JobConfigurationError("item_key cannot be blank")
+        for name, value in (
+            ("page_size", page_size),
+            ("start_page", start_page),
+            ("max_pages", max_pages),
+        ):
+            if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+                raise JobConfigurationError(f"{name} must be an integer >= 1")
+        for name, value in (
+            ("item_key", item_key),
+            ("page_param", page_param),
+            ("page_size_param", page_size_param),
+        ):
+            if not isinstance(value, str) or not value.strip():
+                raise JobConfigurationError(f"{name} must be a non-blank string")
+        if page_param == page_size_param:
+            raise JobConfigurationError("page_param and page_size_param must be different")
+        if params is not None and not isinstance(params, Mapping):
+            raise JobConfigurationError("params must be a mapping when set")
 
         base_params = dict(params or {})
         page = start_page

@@ -62,3 +62,54 @@ def test_bootstrap_does_not_rewrite_its_own_contract_tests(tmp_path: Path) -> No
 
     for relative, content in protected.items():
         assert (root / relative).read_text(encoding="utf-8") == content
+
+
+def test_bootstrap_updates_tool_metadata_with_noncanonical_spacing(tmp_path: Path) -> None:
+    root = _template(tmp_path)
+    pyproject = root / "pyproject.toml"
+    text = pyproject.read_text(encoding="utf-8")
+    text = text.replace('package = "airflow_job_template"', 'package="airflow_job_template"')
+    text = text.replace(
+        'project_slug = "airflow-job-template"', 'project_slug="airflow-job-template"'
+    )
+    text = text.replace("bootstrapped = false", "bootstrapped=false")
+    pyproject.write_text(text, encoding="utf-8")
+
+    bootstrap(root, "customer_sync")
+
+    updated = pyproject.read_text(encoding="utf-8")
+    assert 'package = "customer_sync_airflow"' in updated
+    assert 'project_slug = "customer-sync"' in updated
+    assert "bootstrapped = true" in updated
+
+
+def test_bootstrap_rejects_non_boolean_state(tmp_path: Path) -> None:
+    root = _template(tmp_path)
+    pyproject = root / "pyproject.toml"
+    text = pyproject.read_text(encoding="utf-8").replace(
+        "bootstrapped = false", 'bootstrapped = "false"'
+    )
+    pyproject.write_text(text, encoding="utf-8")
+
+    with pytest.raises(BootstrapError, match="must be a boolean"):
+        bootstrap(root, "customer_sync")
+
+
+def test_bootstrap_updates_assignments_when_section_headers_have_comments(tmp_path: Path) -> None:
+    root = _template(tmp_path)
+    pyproject = root / "pyproject.toml"
+    pyproject.write_text(
+        PYPROJECT.replace("[project]", "[project] # package metadata").replace(
+            "[tool.airflow-job-template]",
+            "[tool.airflow-job-template] # template state",
+        ),
+        encoding="utf-8",
+    )
+
+    bootstrap(root, "customer_sync")
+
+    updated = pyproject.read_text(encoding="utf-8")
+    assert 'name = "customer-sync"' in updated
+    assert 'package = "customer_sync_airflow"' in updated
+    assert 'project_slug = "customer-sync"' in updated
+    assert "bootstrapped = true" in updated

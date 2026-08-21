@@ -20,6 +20,7 @@ PROTECTED_PATHS = {
     Path("tests/unit/scripts/test_new_job.py"),
 }
 SLUG_RE = re.compile(r"^[a-z][a-z0-9_-]{1,63}$")
+_SECTION_RE = re.compile(r"^\s*\[([^\[\]]+)]\s*(?:#.*)?$")
 
 
 class BootstrapError(RuntimeError):
@@ -37,6 +38,29 @@ def validate_slug(slug: str) -> str:
 
 def package_name_for(slug: str) -> str:
     return f"{slug.replace('-', '_')}_airflow"
+
+
+def _set_toml_assignment(text: str, section: str, key: str, rendered_value: str) -> str:
+    """Replace exactly one assignment inside a TOML section without a third-party writer"""
+
+    lines = text.splitlines(keepends=True)
+    in_section = False
+    found = 0
+    key_re = re.compile(rf"^\s*{re.escape(key)}\s*=")
+    for index, line in enumerate(lines):
+        section_match = _SECTION_RE.match(line)
+        if section_match:
+            in_section = section_match.group(1).strip() == section
+            continue
+        if in_section and key_re.match(line):
+            found += 1
+            newline = "\n" if line.endswith("\n") else ""
+            lines[index] = f"{key} = {rendered_value}{newline}"
+    if found != 1:
+        raise BootstrapError(
+            f"expected exactly one {key!r} assignment in [{section}], found {found}"
+        )
+    return "".join(lines)
 
 
 def _atomic_write(path: Path, content: str) -> None:
@@ -57,12 +81,18 @@ def _load_state(root: Path) -> dict:
     pyproject = root / "pyproject.toml"
     if not pyproject.is_file():
         raise BootstrapError("pyproject.toml not found; run from the repository root")
-    with pyproject.open("rb") as handle:
-        data = tomllib.load(handle)
     try:
-        return data["tool"][TOOL_NAME]
+        with pyproject.open("rb") as handle:
+            data = tomllib.load(handle)
+    except (OSError, tomllib.TOMLDecodeError) as exc:
+        raise BootstrapError(f"cannot read valid pyproject.toml: {exc}") from exc
+    try:
+        state = data["tool"][TOOL_NAME]
     except (KeyError, TypeError) as exc:
         raise BootstrapError(f"missing [tool.{TOOL_NAME}] configuration") from exc
+    if not isinstance(state, dict):
+        raise BootstrapError(f"[tool.{TOOL_NAME}] must be a TOML table")
+    return state
 
 
 def _iter_text_files(root: Path):
@@ -87,7 +117,12 @@ def bootstrap(root: Path, slug: str) -> list[Path]:
     state = _load_state(root)
 
     current_package = state.get("package")
-    if state.get("bootstrapped") is True or current_package != PLACEHOLDER_PACKAGE:
+    bootstrapped = state.get("bootstrapped")
+    if not isinstance(current_package, str):
+        raise BootstrapError("configured package must be a string")
+    if not isinstance(bootstrapped, bool):
+        raise BootstrapError("configured bootstrapped flag must be a boolean")
+    if bootstrapped or current_package != PLACEHOLDER_PACKAGE:
         raise BootstrapError("template is already bootstrapped; refusing a second rename")
 
     source_dir = root / "src" / PLACEHOLDER_PACKAGE
@@ -104,11 +139,22 @@ def bootstrap(root: Path, slug: str) -> list[Path]:
         updated = original.replace(PLACEHOLDER_PACKAGE, package_name)
         if path == root / "pyproject.toml":
             dist_name = slug.replace("_", "-")
-            updated = updated.replace('name = "airflow-job-template"', f'name = "{dist_name}"', 1)
-            updated = updated.replace(
-                'project_slug = "airflow-job-template"', f'project_slug = "{dist_name}"', 1
+            try:
+                project_data = tomllib.loads(original)
+            except tomllib.TOMLDecodeError as exc:
+                raise BootstrapError(
+                    f"cannot parse pyproject.toml during bootstrap: {exc}"
+                ) from exc
+            project_name = project_data.get("project", {}).get("name")
+            if project_name == "airflow-job-template":
+                updated = _set_toml_assignment(updated, "project", "name", f'"{dist_name}"')
+            updated = _set_toml_assignment(
+                updated, f"tool.{TOOL_NAME}", "package", f'"{package_name}"'
             )
-            updated = updated.replace("bootstrapped = false", "bootstrapped = true", 1)
+            updated = _set_toml_assignment(
+                updated, f"tool.{TOOL_NAME}", "project_slug", f'"{dist_name}"'
+            )
+            updated = _set_toml_assignment(updated, f"tool.{TOOL_NAME}", "bootstrapped", "true")
         if updated != original:
             originals[path] = original
             replacements[path] = updated

@@ -154,10 +154,11 @@ Use a disposable copy. Do not bootstrap the template repository merely to test t
 4. `pip check` + public `airflow.sdk` import smoke;
 5. Ruff lint/format;
 6. Pytest + coverage/DAG integrity;
-7. secret scan;
-8. wheel/package build check;
-9. local Airflow metadata migration + DAG import/serialization smoke;
-10. end-to-end execution of the deterministic `example_simple_job` with `airflow dags test`.
+7. secret scan, including `.env*` variants and credential-bearing URIs;
+8. end-to-end bootstrap + simple/workflow/isolated scaffold generation, compile and Ruff smoke;
+9. wheel/package build check;
+10. local Airflow metadata migration + DAG import/serialization smoke;
+11. end-to-end execution of the deterministic `example_simple_job` with `airflow dags test`.
 
 No credential is hardcoded. Real integration jobs belong in separate environment-specific CI jobs when credentials/test systems exist. For contributors on Windows, this Linux workflow is the release-level Airflow acceptance gate; a local PowerShell run alone is not sufficient for promotion.
 
@@ -171,4 +172,4 @@ python -m compileall -q src dags scripts tests examples
 python -m pip wheel --no-deps . --wheel-dir dist
 ```
 
-Inspect the archive and reject `.git`, `.venv`, caches, `.env`, logs, local Airflow metadata, or other temporary artifacts. A differential delivery should contain only files actually added or changed relative to the target branch.
+Inspect the archive and reject `.git`, `.venv`, caches, `.env*` files other than `.env.example`, logs, local Airflow metadata, or other temporary artifacts. A differential delivery should contain only files actually added or changed relative to the target branch.

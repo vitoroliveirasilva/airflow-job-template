@@ -16,8 +16,10 @@ _SAFE_FILENAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 def safe_filename(value: str, *, max_length: int = 180) -> str:
     """Validate a single filename component and reject traversal or shell-like input"""
 
-    if not value or len(value) > max_length:
-        raise JobConfigurationError(f"filename must be 1..{max_length} characters")
+    if isinstance(max_length, bool) or not isinstance(max_length, int) or max_length < 1:
+        raise JobConfigurationError("max_length must be an integer >= 1")
+    if not isinstance(value, str) or not value or len(value) > max_length:
+        raise JobConfigurationError(f"filename must be a string of 1..{max_length} characters")
     if value in {".", ".."} or "/" in value or "\\" in value:
         raise JobConfigurationError("filename must not contain path separators")
     if not _SAFE_FILENAME_RE.fullmatch(value):
@@ -30,8 +32,8 @@ def safe_filename(value: str, *, max_length: int = 180) -> str:
 def sha256_file(path: str | Path, *, chunk_size: int = 1024 * 1024) -> str:
     """Return a streaming SHA-256 digest without loading the whole artifact into memory"""
 
-    if chunk_size < 1:
-        raise ValueError("chunk_size must be >= 1")
+    if isinstance(chunk_size, bool) or not isinstance(chunk_size, int) or chunk_size < 1:
+        raise ValueError("chunk_size must be an integer >= 1")
     digest = hashlib.sha256()
     with Path(path).open("rb") as handle:
         for chunk in iter(lambda: handle.read(chunk_size), b""):

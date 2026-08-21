@@ -53,3 +53,53 @@ def test_rpa_captures_diagnostic_on_failed_validation(job_context, tmp_path: Pat
         )
     assert session.screenshot_path == diagnostic
     assert session.closed is True
+
+
+def test_rpa_preserves_primary_failure_when_diagnostic_capture_fails(
+    job_context, tmp_path: Path
+) -> None:
+    class DiagnosticFailureSession(Session):
+        def screenshot(self, path):
+            raise RuntimeError("diagnostic failed")
+
+    session = DiagnosticFailureSession(valid=False)
+    with pytest.raises(RuntimeError, match="did not confirm"):
+        update_record(
+            job_context,
+            record_id="42",
+            session=session,
+            diagnostic_path=tmp_path / "failure.png",
+        )
+    assert session.closed is True
+
+
+def test_rpa_preserves_primary_failure_when_cleanup_also_fails(job_context, tmp_path: Path) -> None:
+    class CleanupFailureSession(Session):
+        def close(self):
+            self.closed = True
+            raise RuntimeError("cleanup failed")
+
+    session = CleanupFailureSession(valid=False)
+    with pytest.raises(RuntimeError, match="did not confirm"):
+        update_record(
+            job_context,
+            record_id="42",
+            session=session,
+            diagnostic_path=tmp_path / "failure.png",
+        )
+    assert session.closed is True
+
+
+def test_rpa_surfaces_cleanup_failure_after_success(job_context, tmp_path: Path) -> None:
+    class CleanupFailureSession(Session):
+        def close(self):
+            raise RuntimeError("cleanup failed")
+
+    session = CleanupFailureSession(state="updated")
+    with pytest.raises(RuntimeError, match="cleanup failed"):
+        update_record(
+            job_context,
+            record_id="42",
+            session=session,
+            diagnostic_path=tmp_path / "failure.png",
+        )

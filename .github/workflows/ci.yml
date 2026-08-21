@@ -10,6 +10,7 @@ permissions:
 jobs:
   quality:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     env:
       AIRFLOW_VERSION: "3.3.1"
       PYTHON_VERSION: "3.12"
@@ -17,8 +18,10 @@ jobs:
       AIRFLOW__CORE__DAGS_FOLDER: ${{ github.workspace }}/dags
       PYTHONPATH: ${{ github.workspace }}/src
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v7
         with:
           python-version: ${{ env.PYTHON_VERSION }}
           cache: pip
@@ -47,6 +50,27 @@ jobs:
 
       - name: Secret scan
         run: python scripts/check_secrets.py
+
+      - name: Scaffold end-to-end smoke
+        shell: bash
+        run: |
+          scratch="$(mktemp -d)"
+          trap 'rm -rf "$scratch"' EXIT
+          git archive HEAD | tar -x -C "$scratch"
+
+          python "$scratch/scripts/bootstrap_project.py" ci_smoke --root "$scratch"
+          python "$scratch/scripts/new_job.py" customer_sync --type simple --root "$scratch"
+          python "$scratch/scripts/new_job.py" billing_pipeline --type workflow --root "$scratch"
+          python "$scratch/scripts/new_job.py" portal_update --type isolated --root "$scratch"
+
+          (
+            cd "$scratch"
+            python -m compileall -q src dags scripts tests examples
+            python scripts/check_secrets.py
+            ruff check .
+            ruff format --check .
+            PYTHONPATH="$scratch/src" pytest -q tests/unit/scripts tests/unit/jobs
+          )
 
       - name: Package build check
         shell: bash

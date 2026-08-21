@@ -66,3 +66,27 @@ def test_scaffold_rejects_python_keywords(tmp_path: Path, name: str) -> None:
     root = _bootstrapped_template(tmp_path)
     with pytest.raises(ScaffoldError, match="reserved Python keyword"):
         create_job(root, name, "simple")
+
+
+def test_scaffold_rejects_corrupted_package_path(tmp_path: Path) -> None:
+    root = _bootstrapped_template(tmp_path)
+    pyproject = root / "pyproject.toml"
+    text = pyproject.read_text(encoding="utf-8")
+    text = text.replace('package = "billing_airflow"', 'package = "../../outside"')
+    pyproject.write_text(text, encoding="utf-8")
+
+    with pytest.raises(ScaffoldError, match="valid Python package identifier"):
+        create_job(root, "customer_sync", "simple")
+
+    assert not (root.parent / "outside" / "jobs" / "customer_sync").exists()
+
+
+def test_scaffold_rejects_non_boolean_bootstrap_state(tmp_path: Path) -> None:
+    root = _bootstrapped_template(tmp_path)
+    pyproject = root / "pyproject.toml"
+    text = pyproject.read_text(encoding="utf-8")
+    text = text.replace("bootstrapped = true", 'bootstrapped = "true"')
+    pyproject.write_text(text, encoding="utf-8")
+
+    with pytest.raises(ScaffoldError, match="must be a boolean"):
+        create_job(root, "customer_sync", "simple")

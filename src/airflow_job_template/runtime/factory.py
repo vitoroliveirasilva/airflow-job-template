@@ -29,8 +29,18 @@ def build_single_task_dag(
 ) -> DAG:
     """Build a DAG containing one TaskFlow task and no integration-specific behavior"""
 
-    if not task_id or not task_id.strip():
-        raise ValueError("task_id cannot be blank")
+    if not isinstance(spec, JobSpec):
+        raise TypeError("spec must be a JobSpec")
+    if not callable(job_callable):
+        raise TypeError("job_callable must be callable")
+    if not isinstance(task_id, str) or not task_id.strip():
+        raise ValueError("task_id must be a non-blank string")
+    if task_overrides is not None and not isinstance(task_overrides, Mapping):
+        raise TypeError("task_overrides must be a mapping or None")
+    if dag_overrides is not None and not isinstance(dag_overrides, Mapping):
+        raise TypeError("dag_overrides must be a mapping or None")
+    if task_overrides and "task_id" in task_overrides:
+        raise ValueError("pass task_id via the dedicated task_id argument")
 
     dag_kwargs = spec.as_dag_kwargs(**dict(dag_overrides or {}))
     schedule = dag_kwargs.pop("schedule")
