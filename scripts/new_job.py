@@ -213,7 +213,10 @@ def _workflow_files(package: str, name: str) -> dict[str, str]:
 
 
             def test_placeholder_fails_clearly() -> None:
-                with pytest.raises(JobConfigurationError, match="Implement {name}.extract"):
+                with pytest.raises(
+                    JobConfigurationError,
+                    match=r"Implement {name}\\.extract",
+                ):
                     extract()
             """
         ),

@@ -48,8 +48,11 @@ def test_scaffold_refuses_overwrite(tmp_path: Path) -> None:
 def test_workflow_scaffold_keeps_schedule_explicit(tmp_path: Path) -> None:
     root = _bootstrapped_template(tmp_path)
     create_job(root, "billing_pipeline", "workflow")
-    text = (root / "dags/billing_pipeline.py").read_text(encoding="utf-8")
-    assert "@dag(schedule=DAG_SCHEDULE, **DAG_KWARGS)" in text
+    dag_text = (root / "dags/billing_pipeline.py").read_text(encoding="utf-8")
+    test_text = (root / "tests/unit/jobs/test_billing_pipeline.py").read_text(encoding="utf-8")
+
+    assert "@dag(schedule=DAG_SCHEDULE, **DAG_KWARGS)" in dag_text
+    assert 'match=r"Implement billing_pipeline\\.extract"' in test_text
 
 
 def test_isolated_scaffold_uses_native_external_python(tmp_path: Path) -> None:
