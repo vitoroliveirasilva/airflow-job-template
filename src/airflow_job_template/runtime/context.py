@@ -24,9 +24,7 @@ class JobRunContext:
     def __post_init__(self) -> None:
         object.__setattr__(self, "params", MappingProxyType(dict(self.params)))
         if not self.dag_id or not self.task_id or not self.run_id:
-            raise JobConfigurationError(
-                "dag_id, task_id and run_id are required at runtime"
-            )
+            raise JobConfigurationError("dag_id, task_id and run_id are required at runtime")
         if self.try_number < 1:
             raise JobConfigurationError("try_number must be >= 1")
 
@@ -85,9 +83,7 @@ def job_run_context_from_airflow(context: Mapping[str, Any]) -> JobRunContext:
     try_number = _value(ti, "try_number") or context.get("try_number") or 1
 
     if not all(isinstance(value, str) and value for value in (dag_id, task_id, run_id)):
-        raise JobConfigurationError(
-            "Airflow context is missing dag_id, task_id or run_id"
-        )
+        raise JobConfigurationError("Airflow context is missing dag_id, task_id or run_id")
 
     params = context.get("params") or {}
     if not isinstance(params, Mapping):

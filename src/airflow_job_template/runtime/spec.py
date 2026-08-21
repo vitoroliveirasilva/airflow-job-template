@@ -37,13 +37,9 @@ class JobSpec:
         if not self.description.strip():
             raise JobConfigurationError("description cannot be blank")
         if self.schedule is not None and not self.schedule.strip():
-            raise JobConfigurationError(
-                "schedule must be None or a non-blank Airflow schedule"
-            )
+            raise JobConfigurationError("schedule must be None or a non-blank Airflow schedule")
         if self.start_date.tzinfo is None or self.start_date.utcoffset() is None:
-            raise JobConfigurationError(
-                "start_date must be timezone-aware and deterministic"
-            )
+            raise JobConfigurationError("start_date must be timezone-aware and deterministic")
         if not self.owner.strip():
             raise JobConfigurationError("owner cannot be blank")
         if self.max_active_runs < 1:

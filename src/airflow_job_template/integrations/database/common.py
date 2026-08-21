@@ -44,13 +44,9 @@ def _default_hook_factory(conn_id: str) -> _DbHook:
     try:
         hook = BaseHook.get_hook(conn_id)
     except AirflowNotFoundException as exc:
-        raise JobConfigurationError(
-            f"Airflow Connection {conn_id!r} was not found"
-        ) from exc
+        raise JobConfigurationError(f"Airflow Connection {conn_id!r} was not found") from exc
     if not hasattr(hook, "get_conn"):
-        raise JobConfigurationError(
-            f"Connection {conn_id!r} does not expose a DB-API hook"
-        )
+        raise JobConfigurationError(f"Connection {conn_id!r} does not expose a DB-API hook")
     return hook
 
 
@@ -85,9 +81,7 @@ def _batched(rows: Iterable[Any], size: int) -> Iterator[list[Any]]:
 class DatabaseClient:
     """DB-API operations with explicit transaction boundaries and bounded fetching"""
 
-    def __init__(
-        self, conn_id: str, *, hook_factory: HookFactory | None = None
-    ) -> None:
+    def __init__(self, conn_id: str, *, hook_factory: HookFactory | None = None) -> None:
         if not conn_id.strip():
             raise JobConfigurationError("conn_id cannot be blank")
         self.conn_id = conn_id

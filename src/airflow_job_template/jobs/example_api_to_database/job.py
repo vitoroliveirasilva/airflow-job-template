@@ -29,9 +29,7 @@ def _to_row(item: Any) -> tuple[str, str, str]:
     updated_at = item.get("updated_at")
     values = (external_id, name, updated_at)
     if not all(isinstance(value, str) and value.strip() for value in values):
-        raise JobConfigurationError(
-            "API customer item is missing id, name or updated_at"
-        )
+        raise JobConfigurationError("API customer item is missing id, name or updated_at")
     return (external_id, name, updated_at)
 
 
@@ -74,7 +72,5 @@ def run(
             database.executemany(_UPSERT_SQL, pending, chunk_size=batch_size)
         processed += len(pending)
 
-    log_event(
-        logger, "write_completed", context=context, processed=processed, dry_run=dry_run
-    )
+    log_event(logger, "write_completed", context=context, processed=processed, dry_run=dry_run)
     return JobResult(processed=processed, updated=processed if not dry_run else 0)

@@ -28,9 +28,7 @@ class TaskPolicy:
         if self.execution_timeout <= timedelta(0):
             raise JobConfigurationError("TaskPolicy.execution_timeout must be > 0")
         if self.max_retry_delay is not None and self.max_retry_delay <= timedelta(0):
-            raise JobConfigurationError(
-                "TaskPolicy.max_retry_delay must be > 0 when set"
-            )
+            raise JobConfigurationError("TaskPolicy.max_retry_delay must be > 0 when set")
         if self.priority_weight < 1:
             raise JobConfigurationError("TaskPolicy.priority_weight must be >= 1")
         for field_name, value in (("pool", self.pool), ("queue", self.queue)):

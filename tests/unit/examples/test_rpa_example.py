@@ -29,9 +29,7 @@ class Session:
         self.closed = True
 
 
-def test_rpa_skips_already_applied_state_and_cleans_up(
-    job_context, tmp_path: Path
-) -> None:
+def test_rpa_skips_already_applied_state_and_cleans_up(job_context, tmp_path: Path) -> None:
     session = Session(state="updated")
     result = update_record(
         job_context,
@@ -44,9 +42,7 @@ def test_rpa_skips_already_applied_state_and_cleans_up(
     assert session.closed is True
 
 
-def test_rpa_captures_diagnostic_on_failed_validation(
-    job_context, tmp_path: Path
-) -> None:
+def test_rpa_captures_diagnostic_on_failed_validation(job_context, tmp_path: Path) -> None:
     session = Session(valid=False)
     diagnostic = tmp_path / "failure.png"
     with pytest.raises(RuntimeError, match="did not confirm"):

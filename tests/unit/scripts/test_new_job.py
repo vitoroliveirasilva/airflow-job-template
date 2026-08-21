@@ -36,9 +36,7 @@ def test_simple_scaffold_creates_expected_paths(tmp_path: Path) -> None:
         "src/billing_airflow/jobs/customer_sync/job.py",
         "tests/unit/jobs/test_customer_sync.py",
     }
-    assert "schedule=None" in (root / "dags/customer_sync.py").read_text(
-        encoding="utf-8"
-    )
+    assert "schedule=None" in (root / "dags/customer_sync.py").read_text(encoding="utf-8")
 
 
 def test_scaffold_refuses_overwrite(tmp_path: Path) -> None:

@@ -32,9 +32,7 @@ def test_dag_modules_do_not_call_external_systems_at_top_level() -> None:
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
         for node in tree.body:
             for child in ast.walk(node):
-                if isinstance(
-                    child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)
-                ):
+                if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
                     continue
                 if isinstance(child, ast.Call):
                     assert _call_name(child) not in FORBIDDEN_TOP_LEVEL_CALLS, path.name

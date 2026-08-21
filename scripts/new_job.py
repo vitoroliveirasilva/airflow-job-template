@@ -22,9 +22,7 @@ class ScaffoldError(RuntimeError):
 def validate_job_name(name: str) -> str:
     normalized = name.strip().lower()
     if not JOB_RE.fullmatch(normalized):
-        raise ScaffoldError(
-            "job name must be 2..100 snake_case characters and start with a letter"
-        )
+        raise ScaffoldError("job name must be 2..100 snake_case characters and start with a letter")
     return normalized
 
 
@@ -82,11 +80,11 @@ def _simple_files(package: str, name: str) -> dict[str, str]:
             '''
         ),
         f"src/{package}/jobs/{name}/__init__.py": _template(
-            '''\
+            """\
             from .job import run
 
             __all__ = ["run"]
-            '''
+            """
         ),
         f"src/{package}/jobs/{name}/job.py": _template(
             f'''\
@@ -102,7 +100,7 @@ def _simple_files(package: str, name: str) -> dict[str, str]:
             '''
         ),
         f"tests/unit/jobs/test_{name}.py": _template(
-            f'''\
+            f"""\
             import pytest
 
             from {package}.jobs.{name} import run
@@ -112,7 +110,7 @@ def _simple_files(package: str, name: str) -> dict[str, str]:
             def test_placeholder_fails_clearly(job_context: JobRunContext) -> None:
                 with pytest.raises(JobConfigurationError, match="Implement {name}"):
                     run(job_context)
-            '''
+            """
         ),
     }
 
@@ -157,11 +155,11 @@ def _workflow_files(package: str, name: str) -> dict[str, str]:
             '''
         ),
         f"src/{package}/jobs/{name}/__init__.py": _template(
-            '''\
+            """\
             from .job import extract, load, transform
 
             __all__ = ["extract", "load", "transform"]
-            '''
+            """
         ),
         f"src/{package}/jobs/{name}/job.py": _template(
             f'''\
@@ -185,7 +183,7 @@ def _workflow_files(package: str, name: str) -> dict[str, str]:
             '''
         ),
         f"tests/unit/jobs/test_{name}.py": _template(
-            f'''\
+            f"""\
             import pytest
 
             from {package}.jobs.{name} import extract
@@ -195,7 +193,7 @@ def _workflow_files(package: str, name: str) -> dict[str, str]:
             def test_placeholder_fails_clearly() -> None:
                 with pytest.raises(JobConfigurationError, match="Implement {name}.extract"):
                     extract()
-            '''
+            """
         ),
     }
 
@@ -239,7 +237,7 @@ def _isolated_files(package: str, name: str) -> dict[str, str]:
             '''
         ),
         f"tests/unit/jobs/test_{name}.py": _template(
-            f'''\
+            f"""\
             from pathlib import Path
 
 
@@ -247,7 +245,7 @@ def _isolated_files(package: str, name: str) -> dict[str, str]:
                 text = Path("dags/{name}.py").read_text(encoding="utf-8")
                 assert "@task.external_python" in text
                 assert "/path/to/specialized/venv/bin/python" in text
-            '''
+            """
         ),
     }
 

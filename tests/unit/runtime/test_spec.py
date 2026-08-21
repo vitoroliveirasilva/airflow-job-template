@@ -16,9 +16,7 @@ def test_job_spec_has_safe_defaults() -> None:
     assert kwargs["default_args"]["owner"] == "airflow"
 
 
-@pytest.mark.parametrize(
-    "dag_id", ["CustomerSync", "1_job", "customer-sync", "a" * 101]
-)
+@pytest.mark.parametrize("dag_id", ["CustomerSync", "1_job", "customer-sync", "a" * 101])
 def test_job_spec_rejects_unsafe_dag_ids(dag_id: str) -> None:
     with pytest.raises(JobConfigurationError, match="dag_id"):
         JobSpec(dag_id=dag_id, description="x")

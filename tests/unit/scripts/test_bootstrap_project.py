@@ -35,9 +35,7 @@ def test_bootstrap_renames_package_and_imports_without_touching_env(
 
     assert (root / "src/customer_sync_airflow").is_dir()
     assert not (root / "src/airflow_job_template").exists()
-    assert "customer_sync_airflow" in (root / "dags/example.py").read_text(
-        encoding="utf-8"
-    )
+    assert "customer_sync_airflow" in (root / "dags/example.py").read_text(encoding="utf-8")
     pyproject = (root / "pyproject.toml").read_text(encoding="utf-8")
     assert 'package = "customer_sync_airflow"' in pyproject
     assert "bootstrapped = true" in pyproject

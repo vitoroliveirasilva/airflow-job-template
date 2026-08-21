@@ -75,9 +75,7 @@ def test_executemany_batches_and_commits() -> None:
     connection = Connection(cursor)
     client = DatabaseClient("target_db", hook_factory=lambda _conn_id: Hook(connection))
 
-    processed = client.executemany(
-        "INSERT INTO t VALUES (%s)", [(1,), (2,), (3,)], chunk_size=2
-    )
+    processed = client.executemany("INSERT INTO t VALUES (%s)", [(1,), (2,), (3,)], chunk_size=2)
 
     assert processed == 3
     assert [len(rows) for _sql, rows in cursor.executed_many] == [2, 1]

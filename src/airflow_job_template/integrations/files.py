@@ -44,9 +44,7 @@ def atomic_write_bytes(path: str | Path, data: bytes, *, mode: int = 0o600) -> P
 
     destination = Path(path)
     destination.parent.mkdir(parents=True, exist_ok=True)
-    fd, temp_name = tempfile.mkstemp(
-        prefix=f".{destination.name}.", dir=destination.parent
-    )
+    fd, temp_name = tempfile.mkstemp(prefix=f".{destination.name}.", dir=destination.parent)
     temp_path = Path(temp_name)
     try:
         with os.fdopen(fd, "wb") as handle:

@@ -163,9 +163,7 @@ class HttpClient:
         """Iterate a common page/page-size API without pretending all APIs paginate alike"""
 
         if page_size < 1 or start_page < 1 or max_pages < 1:
-            raise JobConfigurationError(
-                "page_size, start_page and max_pages must be >= 1"
-            )
+            raise JobConfigurationError("page_size, start_page and max_pages must be >= 1")
         if not item_key.strip():
             raise JobConfigurationError("item_key cannot be blank")
 
@@ -179,18 +177,12 @@ class HttpClient:
             }
             payload = self.request_json("GET", endpoint, params=request_params)
             if not isinstance(payload, Mapping):
-                raise NonRetryableJobError(
-                    "paginated HTTP response must be a JSON object"
-                )
+                raise NonRetryableJobError("paginated HTTP response must be a JSON object")
             items = payload.get(item_key)
             if not isinstance(items, list):
-                raise NonRetryableJobError(
-                    f"response field {item_key!r} must be a JSON array"
-                )
+                raise NonRetryableJobError(f"response field {item_key!r} must be a JSON array")
             yield from items
             if len(items) < page_size:
                 return
             page += 1
-        raise NonRetryableJobError(
-            "pagination exceeded max_pages; check the API contract"
-        )
+        raise NonRetryableJobError("pagination exceeded max_pages; check the API contract")
