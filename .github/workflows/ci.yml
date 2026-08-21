@@ -56,9 +56,13 @@ jobs:
           # Parse directly from the configured DAG folder first. Airflow 3's
           # non-local list commands read serialized DAGs from the metadata DB.
           airflow dags list --local
-          airflow dags list-import-errors --local --output json | jq -e 'type == "array" and length == 0'
+          AIRFLOW__LOGGING__LOGGING_LEVEL=ERROR PYTHONWARNINGS=ignore \
+            airflow dags list-import-errors --local --output json 2>/dev/null \
+            | jq -e 'type == "array" and length == 0'
 
           # Then prove the same DAGs can be serialized into the metadata DB.
           airflow dags reserialize
           airflow dags list
-          airflow dags list-import-errors --output json | jq -e 'type == "array" and length == 0'
+          AIRFLOW__LOGGING__LOGGING_LEVEL=ERROR PYTHONWARNINGS=ignore \
+            airflow dags list-import-errors --output json 2>/dev/null \
+            | jq -e 'type == "array" and length == 0'
