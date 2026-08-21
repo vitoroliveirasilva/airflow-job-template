@@ -36,6 +36,11 @@ def test_simple_scaffold_creates_expected_paths(tmp_path: Path) -> None:
         "tests/unit/jobs/test_customer_sync.py",
     }
     assert "schedule=None" in (root / "dags/customer_sync.py").read_text(encoding="utf-8")
+    job_text = (root / "src/billing_airflow/jobs/customer_sync/job.py").read_text(encoding="utf-8")
+    assert (
+        'raise JobConfigurationError("Implement customer_sync.run before enabling the '
+        'DAG schedule")' in job_text
+    )
 
 
 def test_scaffold_refuses_overwrite(tmp_path: Path) -> None:

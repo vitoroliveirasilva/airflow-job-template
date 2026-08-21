@@ -112,9 +112,7 @@ def _simple_files(package: str, name: str) -> dict[str, str]:
 
 
             def run(context: JobRunContext) -> JobResult | None:
-                raise JobConfigurationError(
-                    "Implement {name}.run before enabling the DAG schedule"
-                )
+                raise JobConfigurationError("Implement {name}.run before enabling the DAG schedule")
             '''
         ),
         f"tests/unit/jobs/test_{name}.py": _template(
