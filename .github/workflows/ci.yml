@@ -52,5 +52,13 @@ jobs:
         shell: bash
         run: |
           airflow db migrate
+
+          # Parse directly from the configured DAG folder first. Airflow 3's
+          # non-local list commands read serialized DAGs from the metadata DB.
+          airflow dags list --local
+          test "$(airflow dags list-import-errors --local --output json)" = "[]"
+
+          # Then prove the same DAGs can be serialized into the metadata DB.
+          airflow dags reserialize
           airflow dags list
           test "$(airflow dags list-import-errors --output json)" = "[]"
