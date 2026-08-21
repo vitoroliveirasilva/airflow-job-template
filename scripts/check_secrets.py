@@ -27,7 +27,7 @@ def scan(root: Path) -> list[str]:
     if not root.is_dir():
         raise ValueError(f"scan root is not a directory: {root}")
     findings: list[str] = []
-    for path in root.rglob("*"):
+    for path in sorted(root.rglob("*"), key=lambda item: item.as_posix()):
         if any(part in SKIP_DIRS for part in path.parts):
             continue
         if not path.is_file():
