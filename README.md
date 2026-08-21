@@ -166,6 +166,7 @@ See `dags/example_workflow.py`.
 dag_kwargs = SPEC.as_dag_kwargs()
 schedule = dag_kwargs.pop("schedule")
 
+
 @dag(schedule=schedule, **dag_kwargs)
 def workflow():
     extracted = extract()
