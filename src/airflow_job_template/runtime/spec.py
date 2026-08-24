@@ -48,6 +48,8 @@ class JobSpec:
             raise JobConfigurationError("start_date must be timezone-aware and deterministic")
         if not isinstance(self.owner, str) or not self.owner.strip():
             raise JobConfigurationError("owner must be a non-blank string")
+        if self.owner != self.owner.strip():
+            raise JobConfigurationError("owner must not contain surrounding whitespace")
         if not isinstance(self.catchup, bool):
             raise JobConfigurationError("catchup must be a boolean")
         if isinstance(self.max_active_runs, bool) or not isinstance(self.max_active_runs, int):
@@ -72,6 +74,8 @@ class JobSpec:
                 raise JobConfigurationError(
                     f"invalid tag {tag!r}; use short alphanumeric tags with . _ : or -"
                 )
+        if len(set(normalized_tags)) != len(normalized_tags):
+            raise JobConfigurationError("tags must not contain duplicates")
 
         if not isinstance(self.params, Mapping):
             raise JobConfigurationError("params must be a mapping")
@@ -79,6 +83,8 @@ class JobSpec:
         for name in normalized_params:
             if not isinstance(name, str) or not name.strip():
                 raise JobConfigurationError("Param names must be non-blank strings")
+            if name != name.strip():
+                raise JobConfigurationError("Param names must not contain surrounding whitespace")
 
         object.__setattr__(self, "tags", normalized_tags)
         object.__setattr__(self, "params", MappingProxyType(normalized_params))

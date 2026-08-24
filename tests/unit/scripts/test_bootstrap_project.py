@@ -114,3 +114,15 @@ def test_bootstrap_updates_assignments_when_section_headers_have_comments(tmp_pa
     assert 'package = "customer_sync_airflow"' in updated
     assert 'project_slug = "customer-sync"' in updated
     assert "bootstrapped = true" in updated
+
+
+@pytest.mark.parametrize("slug", ["customer-", "customer_", "a-"])
+def test_bootstrap_rejects_slugs_that_produce_invalid_distribution_names(
+    tmp_path: Path, slug: str
+) -> None:
+    root = _template(tmp_path)
+
+    with pytest.raises(BootstrapError, match="end with a letter or number"):
+        bootstrap(root, slug)
+
+    assert (root / "src/airflow_job_template").is_dir()

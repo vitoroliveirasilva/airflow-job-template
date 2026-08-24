@@ -49,7 +49,10 @@ def is_sensitive_field_name(name: str) -> bool:
 
 
 def _contains_sensitive_pairs(component: str) -> bool:
-    for key, _value in parse_qsl(component, keep_blank_values=True):
+    # ``;`` is still used as a query separator by some systems, while modern
+    # ``parse_qsl`` intentionally recognizes only ``&``. Treat both as separators
+    # so a SAS/token parameter cannot bypass redaction through the legacy form.
+    for key, _value in parse_qsl(component.replace(";", "&"), keep_blank_values=True):
         lowered = key.lower()
         if lowered in _SENSITIVE_URI_QUERY_KEYS:
             return True

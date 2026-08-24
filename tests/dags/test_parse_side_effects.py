@@ -122,6 +122,20 @@ class _ParseTimeCallVisitor(ast.NodeVisitor):
             return
         self._visit_executed_function(function)
 
+    def visit_Import(self, node: ast.Import) -> None:
+        for alias in node.names:
+            local_name = alias.asname or alias.name.split(".", 1)[0]
+            self.aliases[local_name] = alias.name
+
+    def visit_ImportFrom(self, node: ast.ImportFrom) -> None:
+        if node.module is None:
+            return
+        for alias in node.names:
+            if alias.name == "*":
+                continue
+            local_name = alias.asname or alias.name
+            self.aliases[local_name] = f"{node.module}.{alias.name}"
+
     def _resolve_local_function(self, name: str) -> ast.FunctionDef | ast.AsyncFunctionDef | None:
         for scope in reversed(self._scope_stack):
             if name in scope:
@@ -149,11 +163,13 @@ class _ParseTimeCallVisitor(ast.NodeVisitor):
         if node_id in self._active_functions:
             return
         self._active_functions.add(node_id)
+        previous_aliases = self.aliases.copy()
         self._scope_stack.append(_direct_function_definitions(node.body))
         try:
             for statement in node.body:
                 self.visit(statement)
         finally:
+            self.aliases = previous_aliases
             self._scope_stack.pop()
             self._active_functions.remove(node_id)
 
@@ -253,3 +269,22 @@ def workflow():
 dag = workflow()
 """
     assert "airflow.sdk.Variable.get" in _parse_time_call_names(source)
+
+
+def test_parse_time_imports_inside_dag_factories_cannot_bypass_detection() -> None:
+    source = """
+from airflow.sdk import dag
+
+@dag
+def workflow():
+    import requests as req
+    from airflow.sdk import Variable as RuntimeVariable
+
+    req.get("https://example.invalid")
+    RuntimeVariable.get("bad_parse_lookup")
+
+dag = workflow()
+"""
+    names = set(_parse_time_call_names(source))
+    assert "requests.get" in names
+    assert "airflow.sdk.Variable.get" in names

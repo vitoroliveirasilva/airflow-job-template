@@ -25,7 +25,7 @@ def workflow():
     @task(**POLICY.as_task_kwargs())
     def extract_task() -> dict:
         context = get_current_context()
-        return run_with_airflow_error_policy(extract, int(context["params"]["limit"]))
+        return run_with_airflow_error_policy(extract, context["params"]["limit"])
 
     @task(**POLICY.as_task_kwargs())
     def validate_task(metadata: dict) -> dict:

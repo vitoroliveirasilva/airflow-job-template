@@ -33,7 +33,7 @@ PROTECTED_PATHS = {
     Path("tests/unit/scripts/test_scripts_production_regressions.py"),
 }
 
-SLUG_RE = re.compile(r"^[a-z][a-z0-9_-]{1,63}$")
+SLUG_RE = re.compile(r"^[a-z](?:[a-z0-9_-]{0,62}[a-z0-9])$")
 _SECTION_RE = re.compile(r"^\s*\[([^\[\]]+)]\s*(?:#.*)?$")
 
 _WINDOWS_RETRY_ATTEMPTS = 5
@@ -52,7 +52,8 @@ def validate_slug(slug: str) -> str:
 
     if not SLUG_RE.fullmatch(normalized):
         raise BootstrapError(
-            "project slug must be 2..64 lowercase characters using letters, numbers, _ or -"
+            "project slug must be 2..64 lowercase characters using letters, numbers, _ or -; "
+            "it must start with a letter and end with a letter or number"
         )
 
     return normalized
@@ -66,6 +67,17 @@ def _retry_delay(attempt: int) -> None:
     """Sleep briefly between retries for transient Windows filesystem locks"""
 
     time.sleep(_WINDOWS_RETRY_BASE_DELAY_SECONDS * (2**attempt))
+
+
+def _is_link_like(path: Path) -> bool:
+    """Detect symlinks and Windows junctions without following them"""
+
+    is_junction = getattr(path, "is_junction", None)
+    return path.is_symlink() or (is_junction is not None and is_junction())
+
+
+def _raise_walk_error(error: OSError) -> None:
+    raise error
 
 
 def _replace_file(source: Path, destination: Path) -> None:
@@ -173,7 +185,7 @@ def _atomic_write(path: Path, content: str) -> None:
 def _load_state(root: Path) -> dict:
     pyproject = root / "pyproject.toml"
 
-    if pyproject.is_symlink():
+    if _is_link_like(pyproject):
         raise BootstrapError("pyproject.toml must not be a symbolic link")
 
     if not pyproject.is_file():
@@ -197,23 +209,26 @@ def _load_state(root: Path) -> dict:
 
 
 def _iter_text_files(root: Path):
-    for path in root.rglob("*"):
-        relative = path.relative_to(root)
+    for current_dir, dirnames, filenames in os.walk(
+        root,
+        topdown=True,
+        onerror=_raise_walk_error,
+        followlinks=False,
+    ):
+        current = Path(current_dir)
+        dirnames[:] = sorted(
+            name for name in dirnames if name not in SKIP_DIRS and not _is_link_like(current / name)
+        )
+        for name in sorted(filenames):
+            path = current / name
+            relative = path.relative_to(root)
 
-        if any(part in SKIP_DIRS for part in relative.parts):
-            continue
-
-        if path.is_symlink() or not path.is_file():
-            continue
-
-        if path.name.startswith(".env"):
-            continue
-
-        if relative in PROTECTED_PATHS:
-            continue
-
-        if path.suffix in TEXT_SUFFIXES:
-            yield path
+            if _is_link_like(path) or path.name.startswith(".env"):
+                continue
+            if relative in PROTECTED_PATHS:
+                continue
+            if path.is_file() and path.suffix in TEXT_SUFFIXES:
+                yield path
 
 
 def bootstrap(root: Path, slug: str) -> list[Path]:
@@ -238,13 +253,19 @@ def bootstrap(root: Path, slug: str) -> list[Path]:
     source_dir = root / "src" / PLACEHOLDER_PACKAGE
     target_dir = root / "src" / package_name
 
-    if source_dir.is_symlink():
+    source_root = root / "src"
+    if _is_link_like(source_root) or source_root.resolve() != source_root:
+        raise BootstrapError("src directory must not be a symbolic link or junction")
+    if not source_root.is_dir():
+        raise BootstrapError("src directory not found")
+
+    if _is_link_like(source_dir):
         raise BootstrapError("placeholder package directory must not be a symbolic link")
 
     if not source_dir.is_dir():
         raise BootstrapError(f"placeholder package not found: {source_dir.relative_to(root)}")
 
-    if target_dir.exists() or target_dir.is_symlink():
+    if target_dir.exists() or _is_link_like(target_dir):
         raise BootstrapError(f"target package already exists: {target_dir.relative_to(root)}")
 
     originals: dict[Path, str] = {}
@@ -389,7 +410,7 @@ def main(
             args.root,
             args.project_slug,
         )
-    except BootstrapError as exc:
+    except (BootstrapError, OSError) as exc:
         print(
             f"bootstrap failed: {exc}",
             file=sys.stderr,

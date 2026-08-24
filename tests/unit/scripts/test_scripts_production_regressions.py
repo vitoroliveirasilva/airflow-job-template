@@ -64,6 +64,20 @@ def test_bootstrap_refuses_symlinked_pyproject(tmp_path: Path) -> None:
         bootstrap(root, "customer_sync")
 
 
+@pytest.mark.skipif(os.name == "nt", reason="symlink creation is not reliably available on Windows")
+def test_bootstrap_refuses_symlinked_source_root(tmp_path: Path) -> None:
+    root = _template(tmp_path / "repo")
+    source_root = root / "src"
+    outside = tmp_path / "outside_src"
+    source_root.rename(outside)
+    source_root.symlink_to(outside, target_is_directory=True)
+
+    with pytest.raises(BootstrapError, match="src directory"):
+        bootstrap(root, "customer_sync")
+
+    assert (outside / "airflow_job_template").is_dir()
+
+
 def test_workflow_scaffold_uses_non_retryable_error_adapter(tmp_path: Path) -> None:
     root = _template(tmp_path)
     bootstrap(root, "billing")
@@ -87,6 +101,21 @@ def test_new_job_refuses_symlinked_package_directory(tmp_path: Path) -> None:
         create_job(root, "customer_sync", "simple")
 
 
+@pytest.mark.skipif(os.name == "nt", reason="symlink creation is not reliably available on Windows")
+def test_new_job_refuses_symlinked_source_root(tmp_path: Path) -> None:
+    root = _template(tmp_path / "repo")
+    bootstrap(root, "billing")
+    source_root = root / "src"
+    outside = tmp_path / "outside_src"
+    source_root.rename(outside)
+    source_root.symlink_to(outside, target_is_directory=True)
+
+    with pytest.raises(ScaffoldError, match="src directory"):
+        create_job(root, "customer_sync", "simple")
+
+    assert not (outside / "billing_airflow/jobs/customer_sync").exists()
+
+
 def test_secret_scan_detects_fine_grained_github_pat(tmp_path: Path) -> None:
     token = "github_pat_" + ("A" * 30)
     (tmp_path / "settings.txt").write_text(f"TOKEN={token}\n", encoding="utf-8")
@@ -101,4 +130,14 @@ def test_secret_scan_does_not_follow_symlinks_outside_repository(
     key = "AK" + "IA" + ("A" * 16)
     outside.write_text(key, encoding="utf-8")
     (tmp_path / "linked.txt").symlink_to(outside)
+    assert scan(tmp_path) == []
+
+
+@pytest.mark.skipif(os.name == "nt", reason="symlink creation is not reliably available on Windows")
+def test_secret_scan_does_not_descend_into_symlinked_directories(tmp_path: Path) -> None:
+    outside = tmp_path.parent / "outside-secret-dir"
+    outside.mkdir()
+    key = "AK" + "IA" + ("A" * 16)
+    (outside / "settings.txt").write_text(key, encoding="utf-8")
+    (tmp_path / "linked-dir").symlink_to(outside, target_is_directory=True)
     assert scan(tmp_path) == []

@@ -41,6 +41,8 @@ class JobRunContext:
             value = getattr(self, name)
             if not isinstance(value, str) or not value.strip():
                 raise JobConfigurationError(f"{name} must be a non-blank string at runtime")
+            if value != value.strip():
+                raise JobConfigurationError(f"{name} must not contain surrounding whitespace")
         if isinstance(self.try_number, bool) or not isinstance(self.try_number, int):
             raise JobConfigurationError("try_number must be an integer >= 1")
         if self.try_number < 1:
@@ -55,7 +57,15 @@ class JobRunContext:
             raise JobConfigurationError("data_interval_start must not be after data_interval_end")
         if not isinstance(self.params, Mapping):
             raise JobConfigurationError("params must be a mapping at runtime")
-        object.__setattr__(self, "params", MappingProxyType(dict(self.params)))
+        normalized_params = dict(self.params)
+        for name in normalized_params:
+            if not isinstance(name, str) or not name.strip():
+                raise JobConfigurationError("runtime Param names must be non-blank strings")
+            if name != name.strip():
+                raise JobConfigurationError(
+                    "runtime Param names must not contain surrounding whitespace"
+                )
+        object.__setattr__(self, "params", MappingProxyType(normalized_params))
 
 
 @dataclass(frozen=True, slots=True)

@@ -33,3 +33,13 @@ def test_sha256_rejects_boolean_chunk_size(tmp_path: Path) -> None:
     path.write_bytes(b"abc")
     with pytest.raises(ValueError, match="integer"):
         sha256_file(path, chunk_size=True)
+
+
+def test_atomic_text_write_classifies_invalid_encoding_as_configuration_error(
+    tmp_path: Path,
+) -> None:
+    with pytest.raises(JobConfigurationError, match="unknown text encoding"):
+        atomic_write_text(tmp_path / "payload.txt", "text", encoding="not-an-encoding")
+    with pytest.raises(JobConfigurationError, match="cannot be encoded"):
+        atomic_write_text(tmp_path / "payload.txt", "não ASCII", encoding="ascii")
+    assert not (tmp_path / "payload.txt").exists()

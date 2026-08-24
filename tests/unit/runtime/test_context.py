@@ -119,3 +119,29 @@ def test_context_adapter_does_not_coerce_falsy_invalid_params() -> None:
     ti = SimpleNamespace(dag_id="sync", task_id="extract", run_id="run-1", try_number=1)
     with pytest.raises(JobConfigurationError, match="params"):
         job_run_context_from_airflow({"ti": ti, "params": []})
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [("dag_id", " sync"), ("task_id", "extract "), ("run_id", " run-1 ")],
+)
+def test_job_run_context_rejects_ambiguous_whitespace_in_ids(
+    job_context, field: str, value: str
+) -> None:
+    from dataclasses import replace
+
+    with pytest.raises(JobConfigurationError, match="surrounding whitespace"):
+        replace(job_context, **{field: value})
+
+
+def test_job_run_context_rejects_ambiguous_param_names(job_context) -> None:
+    from dataclasses import replace
+
+    with pytest.raises(JobConfigurationError, match="Param names"):
+        replace(job_context, params={" limit ": 10})
+
+
+def test_job_result_rejects_sensitive_semicolon_query_parameters() -> None:
+    uri = "https://example.invalid/report.csv?download=1;access_token=secret-value"
+    with pytest.raises(JobConfigurationError, match="must not contain credentials or tokens"):
+        JobResult(artifact_uri=uri)

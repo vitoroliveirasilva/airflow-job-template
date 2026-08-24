@@ -309,7 +309,7 @@ Security defaults/rules:
 - TLS verification stays enabled unless a deployment explicitly configures otherwise;
 - no `shell=True` helpers or execution of Param text as code;
 - scaffold/bootstrap validate names and use filesystem APIs instead of shell interpolation;
-- bootstrap/scaffold refuse sensitive symlink/control-path cases;
+- bootstrap/scaffold refuse sensitive symlink/junction/control-path cases;
 - `scripts/check_secrets.py` catches several high-confidence token/private-key patterns before packaging/CI and does not follow symlinks outside the repository.
 
 ## Development and validation

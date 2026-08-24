@@ -152,7 +152,7 @@ Before delivery, verify:
 
 ## Scaffold validation
 
-`bootstrap_project.py` and `new_job.py` use only the standard library. They validate names, avoid shell execution, write files atomically, reject unsafe symlink/control paths, preserve rewritten file permissions during bootstrap, and refuse unsafe overwrites/repeated bootstrap.
+`bootstrap_project.py` and `new_job.py` use only the standard library. They validate names, avoid shell execution, write files atomically, reject unsafe symlink/junction/control paths, preserve rewritten file permissions during bootstrap, and refuse unsafe overwrites/repeated bootstrap.
 
 A useful end-to-end generator check is:
 

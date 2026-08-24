@@ -35,40 +35,49 @@ def update_record(
 ) -> JobResult:
     """Check state before mutation, preserve primary failures, and always clean up"""
 
-    if not isinstance(record_id, str) or not record_id.strip():
-        raise NonRetryableJobError("record_id must be a non-blank string")
-    if not isinstance(diagnostic_path, Path):
-        raise NonRetryableJobError("diagnostic_path must be a pathlib.Path")
-
     logger = logging.getLogger(__name__)
     failed = False
+    diagnostic_capture_allowed = False
     try:
+        if not isinstance(record_id, str) or not record_id.strip():
+            raise NonRetryableJobError("record_id must be a non-blank string")
+        if record_id != record_id.strip():
+            raise NonRetryableJobError("record_id must not contain surrounding whitespace")
+        if not isinstance(diagnostic_path, Path):
+            raise NonRetryableJobError("diagnostic_path must be a pathlib.Path")
+        diagnostic_capture_allowed = True
+
         state = session.current_state(record_id)
+        if not isinstance(state, str):
+            raise NonRetryableJobError("portal returned a non-string state")
         if state == _ALREADY_UPDATED_STATE:
             return JobResult(processed=1, skipped=1, batch_id=context.run_id)
         if state != _MUTABLE_STATE:
-            raise NonRetryableJobError(
-                f"refusing RPA mutation from unexpected portal state {state!r}"
-            )
+            raise NonRetryableJobError("refusing RPA mutation from unexpected portal state")
 
         session.apply_update(record_id)
-        if not session.validate_update(record_id):
+        validation_result = session.validate_update(record_id)
+        if not isinstance(validation_result, bool):
+            raise NonRetryableJobError("portal returned a non-boolean validation result")
+        if not validation_result:
             # Retry is safe because every attempt starts by checking whether the mutation landed
             raise RetryableJobError("portal did not confirm the update")
         return JobResult(processed=1, updated=1, batch_id=context.run_id)
     except Exception:
         failed = True
-        try:
-            # Store diagnostics only in a deployment-appropriate location. Never capture screens
-            # containing secrets/PII. This path is supplied by the caller for that reason.
-            session.screenshot(diagnostic_path)
-        except Exception:
-            log_event(
-                logger,
-                "rpa_diagnostic_capture_failed",
-                context=context,
-                level=logging.WARNING,
-            )
+        if diagnostic_capture_allowed:
+            try:
+                # Store diagnostics only in a deployment-appropriate location. Never capture
+                # screens containing secrets/PII. This path is supplied by the caller for that
+                # reason.
+                session.screenshot(diagnostic_path)
+            except Exception:
+                log_event(
+                    logger,
+                    "rpa_diagnostic_capture_failed",
+                    context=context,
+                    level=logging.WARNING,
+                )
         raise
     finally:
         try:

@@ -123,3 +123,57 @@ def test_rpa_refuses_mutation_from_unknown_state(job_context, tmp_path: Path) ->
         )
     assert session.applied is False
     assert session.closed is True
+
+
+def test_rpa_rejects_non_boolean_validation_contract(job_context, tmp_path: Path) -> None:
+    session = Session(valid="false")
+    with pytest.raises(NonRetryableJobError, match="non-boolean"):
+        update_record(
+            job_context,
+            record_id="42",
+            session=session,
+            diagnostic_path=tmp_path / "failure.png",
+        )
+    assert session.closed is True
+
+
+def test_rpa_does_not_render_arbitrary_unexpected_state(job_context, tmp_path: Path) -> None:
+    class SecretState:
+        def __repr__(self):
+            raise AssertionError("unexpected state must not be rendered")
+
+    session = Session(state=SecretState())
+    with pytest.raises(NonRetryableJobError, match="non-string state"):
+        update_record(
+            job_context,
+            record_id="42",
+            session=session,
+            diagnostic_path=tmp_path / "failure.png",
+        )
+    assert session.closed is True
+
+
+def test_rpa_rejects_record_id_surrounding_whitespace(job_context, tmp_path: Path) -> None:
+    session = Session()
+    with pytest.raises(NonRetryableJobError, match="surrounding whitespace"):
+        update_record(
+            job_context,
+            record_id=" 42 ",
+            session=session,
+            diagnostic_path=tmp_path / "failure.png",
+        )
+    assert session.applied is False
+    assert session.closed is True
+
+
+def test_rpa_closes_session_when_diagnostic_path_is_invalid(job_context) -> None:
+    session = Session()
+    with pytest.raises(NonRetryableJobError, match=r"pathlib\.Path"):
+        update_record(
+            job_context,
+            record_id="42",
+            session=session,
+            diagnostic_path="failure.png",
+        )
+    assert session.screenshot_path is None
+    assert session.closed is True

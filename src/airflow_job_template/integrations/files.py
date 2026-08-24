@@ -96,4 +96,12 @@ def atomic_write_text(
         raise JobConfigurationError("text must be a string")
     if not isinstance(encoding, str) or not encoding.strip():
         raise JobConfigurationError("encoding must be a non-blank string")
-    return atomic_write_bytes(path, text.encode(encoding), mode=mode)
+    if encoding != encoding.strip():
+        raise JobConfigurationError("encoding must not contain surrounding whitespace")
+    try:
+        data = text.encode(encoding)
+    except LookupError as exc:
+        raise JobConfigurationError(f"unknown text encoding {encoding!r}") from exc
+    except UnicodeEncodeError as exc:
+        raise JobConfigurationError(f"text cannot be encoded using {encoding!r}") from exc
+    return atomic_write_bytes(path, data, mode=mode)

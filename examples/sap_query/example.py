@@ -9,7 +9,7 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from typing import Any, Protocol
 
-from airflow_job_template.runtime import JobResult, JobRunContext
+from airflow_job_template.runtime import JobResult, JobRunContext, NonRetryableJobError
 
 
 class ODataReader(Protocol):
@@ -24,4 +24,6 @@ def run(context: JobRunContext, reader: ODataReader) -> JobResult:
     """Keep protocol access at runtime and return only small execution metadata"""
 
     rows = reader.query("OpenOrders", params={"$select": "OrderId,Status"})
+    if isinstance(rows, (str, bytes, bytearray)) or not isinstance(rows, Sequence):
+        raise NonRetryableJobError("SAP OData reader returned a non-sequence result")
     return JobResult(processed=len(rows), batch_id=context.run_id)

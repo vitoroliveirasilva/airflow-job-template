@@ -159,6 +159,27 @@ def test_invalid_hook_status_is_non_retryable() -> None:
         client.request_json("GET", "/customers")
 
 
+def test_numeric_string_hook_status_is_rejected_instead_of_coerced() -> None:
+    client = HttpClient(
+        "crm_api",
+        hook_factory=lambda _conn_id, _method: Hook([Response("200", {})]),
+    )
+    with pytest.raises(NonRetryableJobError, match="invalid status"):
+        client.request_json("GET", "/customers")
+
+
+def test_missing_connection_raised_by_hook_factory_is_classified() -> None:
+    class AirflowNotFoundException(RuntimeError):
+        pass
+
+    def missing_factory(_conn_id, _method):
+        raise AirflowNotFoundException("missing")
+
+    client = HttpClient("missing_api", hook_factory=missing_factory)
+    with pytest.raises(JobConfigurationError, match="missing_api"):
+        client.request_json("GET", "/customers")
+
+
 def test_pagination_rejects_ambiguous_parameter_names() -> None:
     client = HttpClient("crm_api", hook_factory=lambda _conn_id, _method: Hook([]))
     with pytest.raises(JobConfigurationError, match="must be different"):
@@ -183,6 +204,61 @@ def test_request_rejects_absolute_or_ambiguous_payload_configuration() -> None:
         client.request_json("GET", " /customers ")
     with pytest.raises(JobConfigurationError, match="either data or json_body"):
         client.request_json("POST", "/customers", data="payload", json_body={"id": 1})
+    with pytest.raises(JobConfigurationError, match="forward slashes"):
+        client.request_json("GET", r"\customers\42")
+
+
+@pytest.mark.parametrize(
+    "headers",
+    [
+        {"Bad Header": "value"},
+        {"X-Trace": "value\x00suffix"},
+        {"X-Trace": "value\tsuffix"},
+        {"X-Trace": "snowman-☃"},
+    ],
+)
+def test_request_rejects_invalid_header_syntax_before_hook_creation(headers: dict) -> None:
+    created = False
+
+    def hook_factory(_conn_id, _method):
+        nonlocal created
+        created = True
+        return Hook([Response(200, {})])
+
+    client = HttpClient("crm", hook_factory=hook_factory)
+    with pytest.raises(JobConfigurationError, match="header"):
+        client.request_json("GET", "/customers", headers=headers)
+    assert created is False
+
+
+def test_request_rejects_invalid_query_parameter_names_before_hook_creation() -> None:
+    created = False
+
+    def hook_factory(_conn_id, _method):
+        nonlocal created
+        created = True
+        return Hook([Response(200, {})])
+
+    client = HttpClient("crm", hook_factory=hook_factory)
+    with pytest.raises(JobConfigurationError, match="query parameter names"):
+        client.request_json("GET", "/customers", params={" page ": 1})
+    assert created is False
+
+
+def test_permanent_request_configuration_errors_do_not_consume_retries() -> None:
+    class InvalidHeader(RuntimeError):
+        pass
+
+    class InvalidRequestHook:
+        def run(self, endpoint: str, **kwargs):
+            raise InvalidHeader("provider rejected configuration")
+
+    client = HttpClient(
+        "crm",
+        hook_factory=lambda _conn_id, _method: InvalidRequestHook(),
+    )
+    with pytest.raises(NonRetryableJobError):
+        client.request_json("GET", "/customers")
 
 
 @pytest.mark.parametrize("status", [100, 101, 301, 302, 304, 399])

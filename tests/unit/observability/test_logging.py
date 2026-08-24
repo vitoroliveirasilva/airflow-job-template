@@ -95,6 +95,18 @@ def test_log_event_redacts_token_in_uri_fragment(job_context) -> None:
     assert sensitive_value not in stream.getvalue()
 
 
+def test_log_event_redacts_sensitive_semicolon_query_parameter(job_context) -> None:
+    logger, stream = _logger_with_stream("test.semicolon")
+    sensitive_value = "semicolon-secret"
+    uri_value = "https://example.invalid/report?download=1;token=" + sensitive_value
+
+    log_event(logger, "artifact_ready", context=job_context, artifact_uri=uri_value)
+    payload = json.loads(stream.getvalue())
+
+    assert payload["artifact_uri"] == "<redacted>"
+    assert sensitive_value not in stream.getvalue()
+
+
 @pytest.mark.parametrize(
     "field_name",
     [

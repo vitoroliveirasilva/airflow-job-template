@@ -70,3 +70,16 @@ def test_job_spec_rejects_wrong_runtime_types(field: str, value) -> None:
     kwargs = {"dag_id": "typed_spec", "description": "x", field: value}
     with pytest.raises(JobConfigurationError):
         JobSpec(**kwargs)
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"owner": " airflow "},
+        {"params": {" limit ": 10}},
+        {"tags": ("sync", "sync")},
+    ],
+)
+def test_job_spec_rejects_ambiguous_or_duplicate_metadata(kwargs: dict) -> None:
+    with pytest.raises(JobConfigurationError):
+        JobSpec(dag_id="metadata_validation", description="x", **kwargs)

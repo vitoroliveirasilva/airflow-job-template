@@ -83,6 +83,20 @@ def test_executemany_batches_and_commits() -> None:
     assert connection.closed is True
 
 
+def test_executemany_empty_input_is_a_noop_without_opening_a_connection() -> None:
+    opened = False
+
+    def hook_factory(_conn_id):
+        nonlocal opened
+        opened = True
+        return Hook(Connection(Cursor()))
+
+    client = DatabaseClient("target_db", hook_factory=hook_factory)
+
+    assert client.executemany("INSERT INTO t VALUES (%s)", []) == 0
+    assert opened is False
+
+
 def test_execute_rolls_back_and_classifies_transient_failure() -> None:
     cursor = Cursor(fail_execute=True)
     connection = Connection(cursor)

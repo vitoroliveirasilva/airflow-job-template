@@ -201,8 +201,15 @@ class DatabaseClient:
 
         processed = 0
         try:
+            batches = _batched(row_iterator, chunk_size)
+            first_batch = next(batches, None)
+            if first_batch is None:
+                return 0
+
             with self.connection() as connection, self._cursor(connection) as cursor:
-                for batch in _batched(row_iterator, chunk_size):
+                cursor.executemany(sql, first_batch)
+                processed += len(first_batch)
+                for batch in batches:
                     cursor.executemany(sql, batch)
                     processed += len(batch)
         except JobConfigurationError:

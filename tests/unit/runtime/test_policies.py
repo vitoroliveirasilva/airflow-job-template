@@ -53,3 +53,9 @@ def test_task_policy_rejects_invalid_values(kwargs: dict) -> None:
 def test_task_policy_rejects_wrong_runtime_types(kwargs: dict) -> None:
     with pytest.raises(JobConfigurationError):
         TaskPolicy(**kwargs)
+
+
+@pytest.mark.parametrize("kwargs", [{"pool": " shared "}, {"queue": " workers "}])
+def test_task_policy_rejects_surrounding_whitespace(kwargs: dict) -> None:
+    with pytest.raises(JobConfigurationError, match="surrounding whitespace"):
+        TaskPolicy(**kwargs)

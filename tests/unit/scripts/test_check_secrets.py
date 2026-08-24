@@ -46,3 +46,27 @@ def test_secret_scan_skips_binary_files(tmp_path) -> None:
     key = "AK" + "IA" + ("A" * 16)
     (tmp_path / "artifact.bin").write_bytes(b"\x00" + key.encode("ascii"))
     assert scan(tmp_path) == []
+
+
+@pytest.mark.parametrize(
+    ("label", "token"),
+    [
+        ("GitLab token", "gl" + "pat-" + "A" * 24),
+        ("Google API key", "AI" + "za" + "A" * 35),
+        ("npm token", "npm" + "_" + "A" * 36),
+        ("PyPI token", "pypi-" + "AgEIcHlwaS5vcmc" + "A" * 24),
+        ("Stripe live secret", "sk" + "_live_" + "A" * 24),
+    ],
+)
+def test_secret_scan_detects_additional_high_confidence_tokens(
+    tmp_path, label: str, token: str
+) -> None:
+    (tmp_path / "settings.txt").write_text(f"value={token}\n", encoding="utf-8")
+    assert scan(tmp_path) == [f"{label}: settings.txt"]
+
+
+def test_secret_scan_skips_generated_local_temp_tree(tmp_path) -> None:
+    generated = tmp_path / ".tmp" / "pytest"
+    generated.mkdir(parents=True)
+    (generated / ".env").write_text("TOKEN=test-fixture\n", encoding="utf-8")
+    assert scan(tmp_path) == []

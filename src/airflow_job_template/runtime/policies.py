@@ -48,6 +48,10 @@ class TaskPolicy:
                 raise JobConfigurationError(
                     f"TaskPolicy.{field_name} must be a non-blank string when set"
                 )
+            if value is not None and value != value.strip():
+                raise JobConfigurationError(
+                    f"TaskPolicy.{field_name} must not contain surrounding whitespace"
+                )
 
     def as_task_kwargs(self) -> dict[str, Any]:
         """Return TaskFlow/operator kwargs without meaningless ``None`` values"""

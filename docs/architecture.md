@@ -123,7 +123,7 @@ The code holds only Connection IDs. Connection contents and deployment secrets a
 
 Structured logging redacts obvious secret field names and credential-bearing URI strings. Arbitrary object representations are not serialized because client/connection objects can hide credentials in `__str__`/`__repr__`; non-scalar objects are represented only by type name. Non-finite floating-point values are normalized so log lines remain valid JSON, and trusted execution identity cannot be overwritten by caller fields. `JobResult.artifact_uri` rejects common credential-bearing URI forms before they can be returned through XCom. These are defense-in-depth controls, not permission to log secret payloads.
 
-Bootstrap/scaffold tooling refuses symlinked control/package paths where a local rename/write could escape the intended repository structure. Secret scanning does not follow symlinks outside the repository.
+Bootstrap/scaffold tooling refuses symlinked or junction-backed control/package paths where a local rename/write could escape the intended repository structure. Secret scanning does not follow symlinks or junctions outside the repository.
 
 ## Platform and validation boundary
 

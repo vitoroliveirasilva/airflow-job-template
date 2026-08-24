@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+import re
 from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass
 from numbers import Real
@@ -27,6 +28,21 @@ class _HttpHook(Protocol):
 
 
 HookFactory = Callable[[str, str], _HttpHook]
+
+_HEADER_NAME_RE = re.compile(r"^[!#$%&'*+.^_`|~0-9A-Za-z-]+$")
+_PERMANENT_REQUEST_ERROR_NAMES = {
+    "ImportError",
+    "InvalidHeader",
+    "InvalidJSONError",
+    "InvalidProxyURL",
+    "InvalidSchema",
+    "InvalidURL",
+    "MissingSchema",
+    "SSLError",
+    "TooManyRedirects",
+    "UnrewindableBodyError",
+    "URLRequired",
+}
 
 
 def _positive_finite_seconds(value: float, *, name: str) -> float:
@@ -61,12 +77,46 @@ def _validated_headers(headers: Mapping[str, str] | None) -> dict[str, str]:
     for name, value in headers.items():
         if not isinstance(name, str) or not name.strip():
             raise JobConfigurationError("HTTP header names must be non-blank strings")
-        if name != name.strip() or "\r" in name or "\n" in name:
-            raise JobConfigurationError("HTTP header names must not contain whitespace controls")
+        if name != name.strip():
+            raise JobConfigurationError("HTTP header names must not contain surrounding whitespace")
+        if not _HEADER_NAME_RE.fullmatch(name):
+            raise JobConfigurationError("HTTP header names must contain only RFC token characters")
         if not isinstance(value, str):
             raise JobConfigurationError(f"HTTP header {name!r} value must be a string")
         if "\r" in value or "\n" in value:
             raise JobConfigurationError(f"HTTP header {name!r} value must not contain CR/LF")
+        if any(ord(character) < 32 or ord(character) == 127 for character in value):
+            raise JobConfigurationError(
+                f"HTTP header {name!r} value must not contain control characters"
+            )
+        try:
+            value.encode("latin-1")
+        except UnicodeEncodeError as exc:
+            raise JobConfigurationError(
+                f"HTTP header {name!r} value must contain only Latin-1 characters"
+            ) from exc
+        result[name] = value
+    return result
+
+
+def _validated_params(params: Mapping[str, Any] | None) -> dict[str, Any]:
+    if params is None:
+        return {}
+    if not isinstance(params, Mapping):
+        raise JobConfigurationError("params must be a mapping when set")
+
+    result: dict[str, Any] = {}
+    for name, value in params.items():
+        if not isinstance(name, str) or not name.strip():
+            raise JobConfigurationError("HTTP query parameter names must be non-blank strings")
+        if name != name.strip():
+            raise JobConfigurationError(
+                "HTTP query parameter names must not contain surrounding whitespace"
+            )
+        if any(ord(character) < 32 or ord(character) == 127 for character in name):
+            raise JobConfigurationError(
+                "HTTP query parameter names must not contain control characters"
+            )
         result[name] = value
     return result
 
@@ -146,7 +196,9 @@ class HttpClient:
 
         if not isinstance(method, str):
             raise JobConfigurationError("HTTP method must be a string")
-        normalized_method = method.upper().strip()
+        if method != method.strip():
+            raise JobConfigurationError("HTTP method must not contain surrounding whitespace")
+        normalized_method = method.upper()
         if normalized_method not in {"GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"}:
             raise JobConfigurationError(f"unsupported HTTP method {method!r}")
         if not isinstance(endpoint, str) or not endpoint.strip():
@@ -155,6 +207,10 @@ class HttpClient:
             raise JobConfigurationError("endpoint must not contain surrounding whitespace")
         if "\r" in endpoint or "\n" in endpoint:
             raise JobConfigurationError("endpoint must not contain CR/LF characters")
+        if any(ord(character) < 32 or ord(character) == 127 for character in endpoint):
+            raise JobConfigurationError("endpoint must not contain control characters")
+        if "\\" in endpoint:
+            raise JobConfigurationError("endpoint must use forward slashes")
         parsed_endpoint = urlsplit(endpoint)
         if parsed_endpoint.scheme or parsed_endpoint.netloc:
             raise JobConfigurationError(
@@ -164,8 +220,7 @@ class HttpClient:
             raise JobConfigurationError("endpoint must not contain a URI fragment")
         if data is not None and json_body is not None:
             raise JobConfigurationError("set either data or json_body, not both")
-        if params is not None and not isinstance(params, Mapping):
-            raise JobConfigurationError("params must be a mapping when set")
+        request_params = _validated_params(params)
         request_headers = _validated_headers(headers)
         if retry_safe is not None and not isinstance(retry_safe, bool):
             raise JobConfigurationError("retry_safe must be a boolean or None")
@@ -180,8 +235,8 @@ class HttpClient:
                 "OPTIONS",
             }
         )
-        hook = self._hook_factory(self.conn_id, normalized_method)
         try:
+            hook = self._hook_factory(self.conn_id, normalized_method)
             response = hook.run(
                 endpoint=endpoint,
                 data=data,
@@ -190,7 +245,7 @@ class HttpClient:
                     "timeout": self.timeout.as_requests_timeout(),
                     "check_response": False,
                 },
-                params=dict(params or {}),
+                params=request_params,
                 json=json_body,
             )
         except (JobConfigurationError, NonRetryableJobError, RetryableJobError):
@@ -201,9 +256,7 @@ class HttpClient:
                 raise JobConfigurationError(
                     f"Airflow Connection {self.conn_id!r} was not found"
                 ) from exc
-            permanently_invalid = bool(
-                class_names & {"SSLError", "InvalidURL", "MissingSchema", "InvalidSchema"}
-            )
+            permanently_invalid = bool(class_names & _PERMANENT_REQUEST_ERROR_NAMES)
             error_type = (
                 NonRetryableJobError if permanently_invalid or not can_retry else RetryableJobError
             )
@@ -213,11 +266,15 @@ class HttpClient:
             ) from exc
 
         try:
-            status = int(response.status_code)
-        except (AttributeError, TypeError, ValueError) as exc:
+            status = response.status_code
+        except AttributeError as exc:
             raise NonRetryableJobError(
                 f"HTTP hook returned an invalid status for conn_id={self.conn_id!r}"
             ) from exc
+        if isinstance(status, bool) or not isinstance(status, int):
+            raise NonRetryableJobError(
+                f"HTTP hook returned an invalid status for conn_id={self.conn_id!r}"
+            )
         if not 100 <= status <= 599:
             raise NonRetryableJobError(
                 f"HTTP hook returned out-of-range status {status} for conn_id={self.conn_id!r}"
@@ -277,10 +334,7 @@ class HttpClient:
                 raise JobConfigurationError(f"{name} must not contain surrounding whitespace")
         if page_param == page_size_param:
             raise JobConfigurationError("page_param and page_size_param must be different")
-        if params is not None and not isinstance(params, Mapping):
-            raise JobConfigurationError("params must be a mapping when set")
-
-        base_params = dict(params or {})
+        base_params = _validated_params(params)
         conflicts = {page_param, page_size_param} & base_params.keys()
         if conflicts:
             names = ", ".join(sorted(conflicts))

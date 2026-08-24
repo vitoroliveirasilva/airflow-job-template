@@ -21,6 +21,13 @@ class ScaffoldError(RuntimeError):
     """Raised when a scaffold cannot be generated safely"""
 
 
+def _is_link_like(path: Path) -> bool:
+    """Detect symlinks and Windows junctions without following them"""
+
+    is_junction = getattr(path, "is_junction", None)
+    return path.is_symlink() or (is_junction is not None and is_junction())
+
+
 def validate_job_name(name: str) -> str:
     if not isinstance(name, str):
         raise ScaffoldError("job name must be a string")
@@ -34,7 +41,7 @@ def validate_job_name(name: str) -> str:
 
 def _state(root: Path) -> tuple[str, bool]:
     pyproject = root / "pyproject.toml"
-    if pyproject.is_symlink():
+    if _is_link_like(pyproject):
         raise ScaffoldError("pyproject.toml must not be a symbolic link")
     if not pyproject.is_file():
         raise ScaffoldError("pyproject.toml not found; run from the repository root")
@@ -63,7 +70,7 @@ def _state(root: Path) -> tuple[str, bool]:
 
 def _atomic_create(path: Path, content: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    if path.exists() or path.is_symlink():
+    if path.exists() or _is_link_like(path):
         raise ScaffoldError(f"refusing to overwrite existing file: {path}")
     fd, temp_name = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
     temp_path = Path(temp_name)
@@ -298,9 +305,14 @@ def create_job(root: Path, name: str, job_type: str) -> list[Path]:
     package, bootstrapped = _state(root)
     if not bootstrapped:
         raise ScaffoldError("run scripts/bootstrap_project.py before creating jobs")
-    source_root = (root / "src").resolve()
+    source_root_path = root / "src"
+    if _is_link_like(source_root_path) or source_root_path.resolve() != source_root_path:
+        raise ScaffoldError("src directory must not be a symbolic link or junction")
+    source_root = source_root_path.resolve()
+    if not source_root.is_dir():
+        raise ScaffoldError("src directory not found")
     package_path = source_root / package
-    if package_path.is_symlink():
+    if _is_link_like(package_path):
         raise ScaffoldError("configured package directory must not be a symbolic link")
     package_dir = package_path.resolve()
     if package_dir.parent != source_root or not package_dir.is_dir():
@@ -314,7 +326,7 @@ def create_job(root: Path, name: str, job_type: str) -> list[Path]:
     existing = [
         root / relative
         for relative in planned
-        if (root / relative).exists() or (root / relative).is_symlink()
+        if (root / relative).exists() or _is_link_like(root / relative)
     ]
     if existing:
         joined = ", ".join(str(path.relative_to(root)) for path in existing)
@@ -345,7 +357,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     try:
         created = create_job(args.root, args.job_name, args.type)
-    except ScaffoldError as exc:
+    except (OSError, ScaffoldError) as exc:
         print(f"scaffold failed: {exc}", file=sys.stderr)
         return 2
     print(f"created {args.type} job {validate_job_name(args.job_name)!r}:")
