@@ -7,11 +7,24 @@ import re
 import sys
 from pathlib import Path
 
-SKIP_DIRS = {".git", ".venv", "__pycache__", ".pytest_cache", ".ruff_cache"}
+SKIP_DIRS = {
+    ".git",
+    ".venv",
+    "__pycache__",
+    ".pytest_cache",
+    ".ruff_cache",
+    ".airflow",
+    "build",
+    "dist",
+}
 ALLOWED_ENV_EXAMPLES = {".env.example"}
 PATTERNS = {
-    "private key": re.compile(r"-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----"),
-    "GitHub token": re.compile(r"\bgh[oprsu]_[A-Za-z0-9]{30,}\b"),
+    "private key": re.compile(
+        r"-----BEGIN (?:(?:RSA|EC|DSA|OPENSSH) )?PRIVATE KEY-----"
+        + r"|-----BEGIN PGP "
+        + r"PRIVATE KEY BLOCK-----"
+    ),
+    "GitHub token": re.compile(r"\b(?:gh[oprsu]_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{20,})\b"),
     "AWS access key": re.compile(r"\b(?:AKIA|ASIA)[A-Z0-9]{16}\b"),
     "Slack token": re.compile(r"\bxox[baprs]-[A-Za-z0-9-]{20,}\b"),
     "credential URI": re.compile(r"\b[A-Za-z][A-Za-z0-9+.-]*://[^/\s:@]+:[^/\s@]+@"),
@@ -28,17 +41,15 @@ def scan(root: Path) -> list[str]:
         raise ValueError(f"scan root is not a directory: {root}")
     findings: list[str] = []
     for path in sorted(root.rglob("*"), key=lambda item: item.as_posix()):
-        if any(part in SKIP_DIRS for part in path.parts):
+        relative = path.relative_to(root)
+        if any(part in SKIP_DIRS for part in relative.parts):
             continue
-        if not path.is_file():
+        if _is_forbidden_env_file(path) and (path.is_file() or path.is_symlink()):
+            findings.append(f"forbidden env file: {relative}")
             continue
-        if _is_forbidden_env_file(path):
-            findings.append(f"forbidden env file: {path.relative_to(root)}")
+        if path.is_symlink() or not path.is_file():
             continue
-        try:
-            raw = path.read_bytes()
-        except OSError:
-            raise
+        raw = path.read_bytes()
         if b"\x00" in raw:
             continue
         try:
@@ -47,7 +58,7 @@ def scan(root: Path) -> list[str]:
             continue
         for label, pattern in PATTERNS.items():
             if pattern.search(text):
-                findings.append(f"{label}: {path.relative_to(root)}")
+                findings.append(f"{label}: {relative}")
     return findings
 
 

@@ -3,6 +3,8 @@ from pathlib import Path
 import pytest
 from examples.rpa.example import update_record
 
+from airflow_job_template.runtime import NonRetryableJobError, RetryableJobError
+
 
 class Session:
     def __init__(self, state="pending", *, valid=True):
@@ -44,7 +46,7 @@ def test_rpa_skips_already_applied_state_and_cleans_up(job_context, tmp_path: Pa
 def test_rpa_captures_diagnostic_on_failed_validation(job_context, tmp_path: Path) -> None:
     session = Session(valid=False)
     diagnostic = tmp_path / "failure.png"
-    with pytest.raises(RuntimeError, match="did not confirm"):
+    with pytest.raises(RetryableJobError, match="did not confirm"):
         update_record(
             job_context,
             record_id="42",
@@ -63,7 +65,7 @@ def test_rpa_preserves_primary_failure_when_diagnostic_capture_fails(
             raise RuntimeError("diagnostic failed")
 
     session = DiagnosticFailureSession(valid=False)
-    with pytest.raises(RuntimeError, match="did not confirm"):
+    with pytest.raises(RetryableJobError, match="did not confirm"):
         update_record(
             job_context,
             record_id="42",
@@ -80,7 +82,7 @@ def test_rpa_preserves_primary_failure_when_cleanup_also_fails(job_context, tmp_
             raise RuntimeError("cleanup failed")
 
     session = CleanupFailureSession(valid=False)
-    with pytest.raises(RuntimeError, match="did not confirm"):
+    with pytest.raises(RetryableJobError, match="did not confirm"):
         update_record(
             job_context,
             record_id="42",
@@ -90,16 +92,34 @@ def test_rpa_preserves_primary_failure_when_cleanup_also_fails(job_context, tmp_
     assert session.closed is True
 
 
-def test_rpa_surfaces_cleanup_failure_after_success(job_context, tmp_path: Path) -> None:
+def test_rpa_cleanup_failure_after_confirmed_success_does_not_create_retry(
+    job_context, tmp_path: Path
+) -> None:
     class CleanupFailureSession(Session):
         def close(self):
+            self.closed = True
             raise RuntimeError("cleanup failed")
 
-    session = CleanupFailureSession(state="updated")
-    with pytest.raises(RuntimeError, match="cleanup failed"):
+    session = CleanupFailureSession()
+    result = update_record(
+        job_context,
+        record_id="42",
+        session=session,
+        diagnostic_path=tmp_path / "failure.png",
+    )
+    assert result.updated == 1
+    assert session.applied is True
+    assert session.closed is True
+
+
+def test_rpa_refuses_mutation_from_unknown_state(job_context, tmp_path: Path) -> None:
+    session = Session(state="locked")
+    with pytest.raises(NonRetryableJobError, match="unexpected portal state"):
         update_record(
             job_context,
             record_id="42",
             session=session,
             diagnostic_path=tmp_path / "failure.png",
         )
+    assert session.applied is False
+    assert session.closed is True

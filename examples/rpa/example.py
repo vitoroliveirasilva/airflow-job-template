@@ -7,7 +7,15 @@ from pathlib import Path
 from typing import Protocol
 
 from airflow_job_template.observability import log_event
-from airflow_job_template.runtime import JobResult, JobRunContext
+from airflow_job_template.runtime import (
+    JobResult,
+    JobRunContext,
+    NonRetryableJobError,
+    RetryableJobError,
+)
+
+_ALREADY_UPDATED_STATE = "updated"
+_MUTABLE_STATE = "pending"
 
 
 class PortalSession(Protocol):
@@ -27,14 +35,26 @@ def update_record(
 ) -> JobResult:
     """Check state before mutation, preserve primary failures, and always clean up"""
 
+    if not isinstance(record_id, str) or not record_id.strip():
+        raise NonRetryableJobError("record_id must be a non-blank string")
+    if not isinstance(diagnostic_path, Path):
+        raise NonRetryableJobError("diagnostic_path must be a pathlib.Path")
+
     logger = logging.getLogger(__name__)
     failed = False
     try:
-        if session.current_state(record_id) == "updated":
+        state = session.current_state(record_id)
+        if state == _ALREADY_UPDATED_STATE:
             return JobResult(processed=1, skipped=1, batch_id=context.run_id)
+        if state != _MUTABLE_STATE:
+            raise NonRetryableJobError(
+                f"refusing RPA mutation from unexpected portal state {state!r}"
+            )
+
         session.apply_update(record_id)
         if not session.validate_update(record_id):
-            raise RuntimeError("portal did not confirm the update")
+            # Retry is safe because every attempt starts by checking whether the mutation landed
+            raise RetryableJobError("portal did not confirm the update")
         return JobResult(processed=1, updated=1, batch_id=context.run_id)
     except Exception:
         failed = True
@@ -54,6 +74,11 @@ def update_record(
         try:
             session.close()
         except Exception:
-            if not failed:
-                raise
-            log_event(logger, "rpa_session_cleanup_failed", context=context, level=logging.WARNING)
+            # A cleanup failure after a confirmed side effect must not turn success into a retry
+            log_event(
+                logger,
+                "rpa_session_cleanup_failed",
+                context=context,
+                level=logging.WARNING,
+                preserving_primary_failure=failed,
+            )

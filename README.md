@@ -26,7 +26,7 @@ Run this once before creating jobs. It replaces the generic package name with a 
 python scripts/bootstrap_project.py customer_sync
 ```
 
-For `customer_sync`, the Python package becomes `customer_sync_airflow`. The script updates imports and project metadata, renames the package atomically, never reads/writes `.env*`, and refuses a second bootstrap.
+For `customer_sync`, the Python package becomes `customer_sync_airflow`. The script updates imports and project metadata, renames the package atomically, never reads/writes `.env*`, refuses symlinked control/package paths, preserves permissions of rewritten files, and refuses a second bootstrap.
 
 Use lowercase slugs with letters, numbers, `_` or `-`.
 
@@ -60,8 +60,6 @@ python -m pip install --upgrade pip
 ## 3. Install Airflow reproducibly
 
 Always install Airflow using the constraints file matching both Airflow and Python. Run this section on Linux, macOS, or WSL2 rather than native Windows.
-
-Linux/macOS/WSL2:
 
 ```bash
 AIRFLOW_VERSION=3.3.1
@@ -155,23 +153,47 @@ SPEC = JobSpec(
 dag = build_single_task_dag(spec=SPEC, job_callable=run)
 ```
 
-The factory only creates one TaskFlow task, applies `JobSpec`/`TaskPolicy`, adapts runtime context and non-retryable failures, and returns small result metadata. It does not know about HTTP, databases, SAP, RPA, or workflow topology.
+The factory only creates one TaskFlow task, applies `JobSpec`/`TaskPolicy`, adapts runtime context and non-retryable failures, logs classified outcomes, and returns small result metadata. It does not know about HTTP, databases, SAP, RPA, or workflow topology.
 
 ## Explicit Workflow
 
-Use explicit TaskFlow/operators when steps need independent retries or visibility.
-See `dags/example_workflow.py`.
+Use explicit TaskFlow/operators when steps need independent retries or visibility. See `dags/example_workflow.py`.
+
+Plain Python job functions must be invoked from task bodies, not directly from the `@dag` body. The `@dag` body runs while Airflow builds the graph. When a job function uses the template error hierarchy, wrap it with the shared Airflow error adapter at the task boundary:
 
 ```python
-dag_kwargs = SPEC.as_dag_kwargs()
-schedule = dag_kwargs.pop("schedule")
+from airflow.sdk import dag, task
+
+from <package>.jobs.billing_pipeline import extract, load, validate
+from <package>.runtime import JobSpec, run_with_airflow_error_policy
+
+SPEC = JobSpec(
+    dag_id="billing_pipeline",
+    description="Extract, validate, and load billing data",
+)
+
+DAG_KWARGS = SPEC.as_dag_kwargs()
+DAG_SCHEDULE = DAG_KWARGS.pop("schedule")
 
 
-@dag(schedule=schedule, **dag_kwargs)
+@dag(schedule=DAG_SCHEDULE, **DAG_KWARGS)
 def workflow():
-    extracted = extract()
-    validated = validate(extracted)
-    load(validated)
+    @task(**SPEC.task_policy.as_task_kwargs())
+    def extract_task():
+        return run_with_airflow_error_policy(extract)
+
+    @task(**SPEC.task_policy.as_task_kwargs())
+    def validate_task(metadata):
+        return run_with_airflow_error_policy(validate, metadata)
+
+    @task(**SPEC.task_policy.as_task_kwargs())
+    def load_task(metadata):
+        return run_with_airflow_error_policy(load, metadata)
+
+    load_task(validate_task(extract_task()))
+
+
+dag = workflow()
 ```
 
 Do not force multi-task workflows through the Simple Job factory. Native operators, sensors, deferrable operators, task groups, and provider operators are first-class options.
@@ -221,7 +243,7 @@ params = {
 }
 ```
 
-Never put a password/token in a Param. Avoid `Variable.get()` at DAG top level; resolve runtime configuration inside a task when needed.
+Never put a password/token in a Param. Avoid `Variable.get()` at DAG top level or in graph-construction code; resolve runtime configuration inside a task when needed.
 
 ## Integrations
 
@@ -233,9 +255,9 @@ HTTP behavior:
 - TLS verification is not disabled;
 - no hidden client retry loop, so task-level retries do not multiply unexpectedly;
 - `408`, `425`, `429`, and `5xx` are retryable only when the operation is retry-safe;
-- GET/HEAD/OPTIONS are retry-safe by default; mutating methods require explicit `retry_safe=True`
-  after idempotency has been established;
+- GET/HEAD/OPTIONS are retry-safe by default; mutating methods require explicit `retry_safe=True` after idempotency has been established;
 - functional `4xx` failures are non-retryable;
+- endpoint, headers, and pagination-owned inputs are validated before network I/O;
 - pagination helper only models the common page/page-size contract.
 
 Database behavior:
@@ -244,9 +266,10 @@ Database behavior:
 - explicit transaction boundary with commit/rollback/cleanup;
 - parameterized SQL expected;
 - batch `executemany` and bounded/streaming reads;
+- no-parameter statements use the portable one-argument DB-API call;
 - provider Hook remains accessible for advanced/native behavior.
 
-See `examples/api_to_database/` for an idempotent PostgreSQL UPSERT example. The helper does not try to hide SQL dialect differences.
+See `examples/api_to_database/` for an idempotent PostgreSQL UPSERT example. The example defaults to `dry_run=True` even when invoked directly with no `dry_run` Param. The helper does not try to hide SQL dialect differences.
 
 ## Idempotency and retries
 
@@ -259,23 +282,23 @@ A retry repeats the unit of work, so every mutable job needs a strategy.
 | RPA       | locate by stable ID, check current state, mutate, verify result |
 | files     | deterministic name/checksum, processed-file ledger, atomic move |
 
-`RetryableJobError` lets Airflow use normal retries. `NonRetryableJobError` is adapted by the Simple Job factory to an Airflow fail-without-retry exception. Do not blindly retry a mutating RPA/API operation unless repeating it is demonstrably safe.
+`RetryableJobError` lets Airflow use normal retries. `NonRetryableJobError` is mapped by `run_with_airflow_error_policy()` to an Airflow fail-without-retry exception. The Simple Job factory applies this automatically; explicit Python workflows apply it inside their `@task` wrappers. Do not blindly retry a mutating RPA/API operation unless repeating it is demonstrably safe.
 
 ## Files and XCom
 
 A task may use local temporary files during its own execution. Do not assume `/tmp/a.csv` written by one task exists on the worker that runs the next task. Put cross-task artifacts in storage supported by the deployment and pass only a URI/path/ID through XCom.
 
-`JobResult` intentionally accepts only small scalar execution metadata such as counts, `batch_id`, and `artifact_uri`.
+`JobResult` intentionally accepts only small scalar execution metadata such as counts, `batch_id`, and `artifact_uri`. String metadata is bounded, and `artifact_uri` rejects credential-bearing URI forms.
 
 ## SAP and RPA
 
 `integrations/sap/` is an extension point, not a fake universal SAP client. Add concrete adapters such as OData/RFC/HANA only when the protocol and runtime are known. SAP GUI belongs to the isolated RPA profile.
 
-For browser automation, keep one browser session inside one task when there is no durable checkpoint between steps. Check state before mutable actions, validate afterward, clean up in `finally`, and store diagnostics outside XCom without exposing credentials/PII. See `examples/rpa/`.
+For browser automation, keep one browser session inside one task when there is no durable checkpoint between steps. Check a known state before mutable actions, validate afterward, clean up in `finally`, and store diagnostics outside XCom without exposing credentials/PII. A cleanup failure after a confirmed remote mutation should not automatically convert that successful side effect into a retry. See `examples/rpa/`.
 
 ## Logging and security
 
-Use normal Python logging. `log_event()` adds compact execution context, redacts fields whose names indicate credentials/tokens/passwords, redacts credential-bearing URI strings, and avoids serializing arbitrary object representations. `JobResult.artifact_uri` also rejects URIs containing embedded credentials or sensitive token/signature query parameters before they can reach XCom. Do not rely on these safeguards alone: never pass secret payloads to the logger or XCom in the first place.
+Use normal Python logging. `log_event()` adds compact execution context, redacts fields whose names indicate credentials/tokens/passwords, redacts credential-bearing URI strings, avoids serializing arbitrary object representations, normalizes non-finite numbers to valid JSON-safe markers, and prevents caller fields from overwriting trusted run identity. `JobResult.artifact_uri` also rejects URIs containing embedded credentials or sensitive token/signature query parameters before they can reach XCom. Do not rely on these safeguards alone: never pass secret payloads to the logger or XCom in the first place.
 
 Security defaults/rules:
 
@@ -286,8 +309,8 @@ Security defaults/rules:
 - TLS verification stays enabled unless a deployment explicitly configures otherwise;
 - no `shell=True` helpers or execution of Param text as code;
 - scaffold/bootstrap validate names and use filesystem APIs instead of shell interpolation;
-- `scripts/check_secrets.py` catches several high-confidence token/private-key patterns before
-  packaging/CI.
+- bootstrap/scaffold refuse sensitive symlink/control-path cases;
+- `scripts/check_secrets.py` catches several high-confidence token/private-key patterns before packaging/CI and does not follow symlinks outside the repository.
 
 ## Development and validation
 
@@ -363,7 +386,7 @@ For long waits, prefer sensors and deferrable operators where available. Do not 
 ```text
 dags/                       thin Airflow definitions
 src/<project_package>/
-  runtime/                  JobSpec, TaskPolicy, context, errors, Simple Job factory
+  runtime/                  JobSpec, TaskPolicy, context, errors, Airflow adapter, Simple Job factory
   integrations/             small runtime integration helpers/extension points
   jobs/                     pure or mostly-pure use-case logic
   observability/            logging helpers

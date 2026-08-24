@@ -12,8 +12,9 @@ from airflow.sdk.exceptions import AirflowFailException
 
 from airflow_job_template.observability.logging import log_event
 
+from .airflow import run_with_airflow_error_policy
 from .context import JobResult, JobRunContext, job_run_context_from_airflow
-from .errors import NonRetryableJobError
+from .errors import RetryableJobError
 from .spec import JobSpec
 
 JobCallable = Callable[[JobRunContext], JobResult | None]
@@ -35,6 +36,8 @@ def build_single_task_dag(
         raise TypeError("job_callable must be callable")
     if not isinstance(task_id, str) or not task_id.strip():
         raise ValueError("task_id must be a non-blank string")
+    if task_id != task_id.strip():
+        raise ValueError("task_id must not contain surrounding whitespace")
     if task_overrides is not None and not isinstance(task_overrides, Mapping):
         raise TypeError("task_overrides must be a mapping or None")
     if dag_overrides is not None and not isinstance(dag_overrides, Mapping):
@@ -56,17 +59,40 @@ def build_single_task_dag(
             started = perf_counter()
             log_event(logger, "job_started", context=context)
             try:
-                result = job_callable(context)
-            except NonRetryableJobError as exc:
+                result = run_with_airflow_error_policy(job_callable, context)
+            except AirflowFailException as exc:
+                cause = exc.__cause__
                 log_event(
                     logger,
                     "job_failed_non_retryable",
                     context=context,
+                    error_type=type(cause).__name__ if cause is not None else type(exc).__name__,
+                )
+                raise
+            except RetryableJobError as exc:
+                log_event(
+                    logger,
+                    "job_failed_retryable",
+                    context=context,
                     error_type=type(exc).__name__,
                 )
-                raise AirflowFailException(str(exc)) from exc
+                raise
+            except Exception as exc:
+                log_event(
+                    logger,
+                    "job_failed_unexpected",
+                    context=context,
+                    error_type=type(exc).__name__,
+                )
+                raise
 
             if result is not None and not isinstance(result, JobResult):
+                log_event(
+                    logger,
+                    "job_failed_contract",
+                    context=context,
+                    result_type=type(result).__name__,
+                )
                 raise AirflowFailException(
                     "Simple jobs must return JobResult or None; store large payloads externally"
                 )

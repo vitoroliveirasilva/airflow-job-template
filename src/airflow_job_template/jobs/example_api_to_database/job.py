@@ -42,7 +42,7 @@ def run(
     """Fetch pages and upsert batches; no network or DB work occurs during DAG parsing"""
 
     batch_size = context.params.get("batch_size", 500)
-    dry_run = context.params.get("dry_run", False)
+    dry_run = context.params.get("dry_run", True)
     if isinstance(batch_size, bool) or not isinstance(batch_size, int):
         raise JobConfigurationError("batch_size must be an integer")
     if not 1 <= batch_size <= 5_000:

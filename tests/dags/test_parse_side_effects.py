@@ -64,19 +64,71 @@ def _canonical_call_name(node: ast.Call, aliases: dict[str, str]) -> str:
     return canonical_head + (separator + tail if separator else "")
 
 
-class _ParseTimeCallVisitor(ast.NodeVisitor):
-    """Visit expressions executed while a DAG module is imported, not task/function bodies"""
+def _direct_function_definitions(
+    nodes: list[ast.stmt],
+) -> dict[str, ast.FunctionDef | ast.AsyncFunctionDef]:
+    return {
+        node.name: node
+        for node in nodes
+        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef)
+    }
 
-    def __init__(self) -> None:
+
+def _decorator_call_name(
+    decorator: ast.expr,
+    aliases: dict[str, str],
+) -> str:
+    target = decorator.func if isinstance(decorator, ast.Call) else decorator
+    fake_call = ast.Call(func=target, args=[], keywords=[])
+    return _canonical_call_name(fake_call, aliases)
+
+
+def _is_task_function(
+    node: ast.FunctionDef | ast.AsyncFunctionDef,
+    aliases: dict[str, str],
+) -> bool:
+    for decorator in node.decorator_list:
+        name = _decorator_call_name(decorator, aliases)
+        if name == "airflow.sdk.task" or name.startswith("airflow.sdk.task."):
+            return True
+    return False
+
+
+class _ParseTimeCallVisitor(ast.NodeVisitor):
+    """
+    Visit expressions executed while a DAG module constructs its graph.
+
+    Besides module-level expressions, the visitor follows local Python functions when they are
+    called from parse-time code. This matters for ``dag = workflow()``: an ``@dag`` function body
+    executes while the graph is built, whereas nested ``@task`` function bodies execute later on a
+    worker and must remain outside the parse-time scan.
+    """
+
+    def __init__(self, tree: ast.Module, aliases: dict[str, str]) -> None:
         self.calls: list[ast.Call] = []
+        self.aliases = aliases
+        self._scope_stack = [_direct_function_definitions(tree.body)]
+        self._active_functions: set[int] = set()
 
     def visit_Call(self, node: ast.Call) -> None:
         self.calls.append(node)
         self.generic_visit(node)
 
-    def _visit_function_definition(self, node: ast.FunctionDef | ast.AsyncFunctionDef) -> None:
-        # Decorators/defaults/annotations are evaluated when the function is defined
-        # The function body is not.
+        name = _call_name(node)
+        if "." in name or not name:
+            return
+        function = self._resolve_local_function(name)
+        if function is None or _is_task_function(function, self.aliases):
+            return
+        self._visit_executed_function(function)
+
+    def _resolve_local_function(self, name: str) -> ast.FunctionDef | ast.AsyncFunctionDef | None:
+        for scope in reversed(self._scope_stack):
+            if name in scope:
+                return scope[name]
+        return None
+
+    def _visit_definition_metadata(self, node: ast.FunctionDef | ast.AsyncFunctionDef) -> None:
         for decorator in node.decorator_list:
             self.visit(decorator)
         for default in (*node.args.defaults, *node.args.kw_defaults):
@@ -92,21 +144,35 @@ class _ParseTimeCallVisitor(ast.NodeVisitor):
         if node.returns is not None:
             self.visit(node.returns)
 
+    def _visit_executed_function(self, node: ast.FunctionDef | ast.AsyncFunctionDef) -> None:
+        node_id = id(node)
+        if node_id in self._active_functions:
+            return
+        self._active_functions.add(node_id)
+        self._scope_stack.append(_direct_function_definitions(node.body))
+        try:
+            for statement in node.body:
+                self.visit(statement)
+        finally:
+            self._scope_stack.pop()
+            self._active_functions.remove(node_id)
+
     def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
-        self._visit_function_definition(node)
+        self._visit_definition_metadata(node)
 
     def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
-        self._visit_function_definition(node)
+        self._visit_definition_metadata(node)
 
     def visit_Lambda(self, node: ast.Lambda) -> None:
-        # Lambda defaults do not exist; its body executes only when called.
+        # Lambda bodies execute only when called; local lambda call analysis is intentionally
+        # outside this small static guard.
         return
 
 
 def _parse_time_call_names(source: str, *, filename: str = "<unknown>") -> list[str]:
     tree = ast.parse(source, filename=filename)
     aliases = _import_aliases(tree)
-    visitor = _ParseTimeCallVisitor()
+    visitor = _ParseTimeCallVisitor(tree, aliases)
     visitor.visit(tree)
     return [_canonical_call_name(call, aliases) for call in visitor.calls]
 
@@ -151,3 +217,39 @@ V.get("bad_parse_lookup")
     names = set(_parse_time_call_names(source))
     assert "requests.get" in names
     assert "airflow.sdk.Variable.get" in names
+
+
+def test_dag_factory_body_is_parse_time_but_nested_task_body_is_not() -> None:
+    source = """
+from airflow.sdk import Variable, dag, task
+
+@dag
+def workflow():
+    Variable.get("bad_graph_build_lookup")
+
+    @task
+    def execute():
+        return Variable.get("valid_runtime_lookup")
+
+    execute()
+
+dag = workflow()
+"""
+    names = _parse_time_call_names(source)
+    assert names.count("airflow.sdk.Variable.get") == 1
+
+
+def test_parse_time_local_helper_calls_are_followed() -> None:
+    source = """
+from airflow.sdk import Variable, dag
+
+def configure_graph():
+    return Variable.get("bad_helper_lookup")
+
+@dag
+def workflow():
+    configure_graph()
+
+dag = workflow()
+"""
+    assert "airflow.sdk.Variable.get" in _parse_time_call_names(source)

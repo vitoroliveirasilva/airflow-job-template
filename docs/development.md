@@ -101,23 +101,46 @@ They should not be mixed into the default unit-test gate.
 
 1. Confirm a community/official provider exists before writing a Hook/operator.
 2. Add it under `requirements/optional/` unless every job genuinely needs it.
-3. Install it using the same Airflow constraints URL and include the exact `apache-airflow`
-   version in the same pip command so a provider install cannot silently move the core version.
+3. Install it using the same Airflow constraints URL and include the exact `apache-airflow` version in the same pip command so a provider install cannot silently move the core version.
 4. Keep provider-specific imports out of DAG top-level code when they are heavy/optional.
 5. Add unit tests with fakes plus marked integration tests where a real system is available.
 
 Do not add browser engines, pandas, SAP SDKs, Docker/Kubernetes providers, or database drivers to the core just because a future job may need them.
+
+## Explicit workflow task boundary
+
+Plain Python business functions are not Airflow tasks by themselves. In an explicit workflow, call them from inside `@task` functions. If the function uses the template error hierarchy, apply the shared error adapter at that task boundary:
+
+```python
+from airflow.sdk import dag, task
+
+from my_project.jobs.customer_sync import extract
+from my_project.runtime import run_with_airflow_error_policy
+
+
+@dag(...)
+def workflow():
+    @task(...)
+    def extract_task():
+        return run_with_airflow_error_policy(extract)
+
+    extract_task()
+```
+
+Do not call `extract()` directly in the `@dag` body. That body runs while Airflow constructs the graph, not when a worker executes the task.
 
 ## DAG review checklist
 
 Before delivery, verify:
 
 - DAG file is mostly declarations/tasks/dependencies;
-- no DB/HTTP/SAP request or expensive discovery runs during import;
+- no DB/HTTP/SAP request or expensive discovery runs during import or DAG graph construction;
+- plain business functions are called from task/operator execution boundaries, not directly from an `@dag` body;
 - `start_date` is deterministic and timezone-aware;
 - schedule/catchup are intentional;
 - each external call has a client timeout and the task has an execution timeout;
 - retry is safe for the job's side effects;
+- permanent `NonRetryableJobError` failures are adapted at explicit Python task boundaries;
 - overlap/concurrency is intentional;
 - Params validate manual inputs and contain no secrets;
 - Connections contain credentials/endpoints rather than source code;
@@ -129,7 +152,7 @@ Before delivery, verify:
 
 ## Scaffold validation
 
-`bootstrap_project.py` and `new_job.py` use only the standard library. They validate names, avoid shell execution, write files atomically, and refuse unsafe overwrites/repeated bootstrap.
+`bootstrap_project.py` and `new_job.py` use only the standard library. They validate names, avoid shell execution, write files atomically, reject unsafe symlink/control paths, preserve rewritten file permissions during bootstrap, and refuse unsafe overwrites/repeated bootstrap.
 
 A useful end-to-end generator check is:
 

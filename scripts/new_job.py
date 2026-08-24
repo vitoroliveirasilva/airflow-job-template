@@ -22,6 +22,8 @@ class ScaffoldError(RuntimeError):
 
 
 def validate_job_name(name: str) -> str:
+    if not isinstance(name, str):
+        raise ScaffoldError("job name must be a string")
     normalized = name.strip().lower()
     if not JOB_RE.fullmatch(normalized):
         raise ScaffoldError("job name must be 2..100 snake_case characters and start with a letter")
@@ -32,6 +34,8 @@ def validate_job_name(name: str) -> str:
 
 def _state(root: Path) -> tuple[str, bool]:
     pyproject = root / "pyproject.toml"
+    if pyproject.is_symlink():
+        raise ScaffoldError("pyproject.toml must not be a symbolic link")
     if not pyproject.is_file():
         raise ScaffoldError("pyproject.toml not found; run from the repository root")
     try:
@@ -59,7 +63,7 @@ def _state(root: Path) -> tuple[str, bool]:
 
 def _atomic_create(path: Path, content: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    if path.exists():
+    if path.exists() or path.is_symlink():
         raise ScaffoldError(f"refusing to overwrite existing file: {path}")
     fd, temp_name = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
     temp_path = Path(temp_name)
@@ -68,6 +72,7 @@ def _atomic_create(path: Path, content: str) -> None:
             handle.write(content)
             handle.flush()
             os.fsync(handle.fileno())
+        os.chmod(temp_path, 0o644)
         os.replace(temp_path, path)
     except Exception:
         temp_path.unlink(missing_ok=True)
@@ -140,7 +145,7 @@ def _workflow_files(package: str, name: str) -> dict[str, str]:
             from airflow.sdk import dag, task
 
             from {package}.jobs.{name} import extract, load, transform
-            from {package}.runtime import JobSpec
+            from {package}.runtime import JobSpec, run_with_airflow_error_policy
 
             SPEC = JobSpec(
                 dag_id="{name}",
@@ -158,15 +163,15 @@ def _workflow_files(package: str, name: str) -> dict[str, str]:
             def workflow():
                 @task(**SPEC.task_policy.as_task_kwargs())
                 def extract_task() -> dict[str, int | str]:
-                    return extract()
+                    return run_with_airflow_error_policy(extract)
 
                 @task(**SPEC.task_policy.as_task_kwargs())
                 def transform_task(metadata: dict[str, int | str]) -> dict[str, int | str]:
-                    return transform(metadata)
+                    return run_with_airflow_error_policy(transform, metadata)
 
                 @task(**SPEC.task_policy.as_task_kwargs())
                 def load_task(metadata: dict[str, int | str]) -> None:
-                    load(metadata)
+                    run_with_airflow_error_policy(load, metadata)
 
                 load_task(transform_task(extract_task()))
 
@@ -294,7 +299,10 @@ def create_job(root: Path, name: str, job_type: str) -> list[Path]:
     if not bootstrapped:
         raise ScaffoldError("run scripts/bootstrap_project.py before creating jobs")
     source_root = (root / "src").resolve()
-    package_dir = (source_root / package).resolve()
+    package_path = source_root / package
+    if package_path.is_symlink():
+        raise ScaffoldError("configured package directory must not be a symbolic link")
+    package_dir = package_path.resolve()
     if package_dir.parent != source_root or not package_dir.is_dir():
         raise ScaffoldError("configured package directory must be a direct child of src/")
 
@@ -303,7 +311,11 @@ def create_job(root: Path, name: str, job_type: str) -> list[Path]:
         destination = (root / relative).resolve()
         if not destination.is_relative_to(root):
             raise ScaffoldError(f"generated path escapes repository root: {relative}")
-    existing = [root / relative for relative in planned if (root / relative).exists()]
+    existing = [
+        root / relative
+        for relative in planned
+        if (root / relative).exists() or (root / relative).is_symlink()
+    ]
     if existing:
         joined = ", ".join(str(path.relative_to(root)) for path in existing)
         raise ScaffoldError(f"job already exists or paths are occupied: {joined}")

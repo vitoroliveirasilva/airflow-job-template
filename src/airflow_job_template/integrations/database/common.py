@@ -51,10 +51,21 @@ def _default_hook_factory(conn_id: str) -> _DbHook:
     return hook
 
 
+def _exception_class_names(exc: BaseException) -> set[str]:
+    names: set[str] = set()
+    seen: set[int] = set()
+    current: BaseException | None = exc
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        names.update(cls.__name__ for cls in type(current).__mro__)
+        current = current.__cause__ or current.__context__
+    return names
+
+
 def _raise_db_error(exc: Exception, *, operation: str, conn_id: str) -> None:
     """Map portable PEP-249 error classes and leave unknown driver errors untouched"""
 
-    class_names = {cls.__name__ for cls in type(exc).__mro__}
+    class_names = _exception_class_names(exc)
     message = f"database {operation} failed for conn_id={conn_id!r}"
     if class_names & {"OperationalError", "InterfaceError"}:
         raise RetryableJobError(message) from exc
@@ -74,12 +85,21 @@ def _batched(rows: Iterable[Any], size: int) -> Iterator[list[Any]]:
         yield batch
 
 
+def _execute(cursor: _Cursor, sql: str, parameters: Any) -> None:
+    if parameters is None:
+        cursor.execute(sql)
+    else:
+        cursor.execute(sql, parameters)
+
+
 class DatabaseClient:
     """DB-API operations with explicit transaction boundaries and bounded fetching"""
 
     def __init__(self, conn_id: str, *, hook_factory: HookFactory | None = None) -> None:
         if not isinstance(conn_id, str) or not conn_id.strip():
             raise JobConfigurationError("conn_id must be a non-blank string")
+        if conn_id != conn_id.strip():
+            raise JobConfigurationError("conn_id must not contain surrounding whitespace")
         if hook_factory is not None and not callable(hook_factory):
             raise JobConfigurationError("hook_factory must be callable")
         self.conn_id = conn_id
@@ -151,7 +171,7 @@ class DatabaseClient:
             raise JobConfigurationError("sql must be a non-blank string")
         try:
             with self.connection() as connection, self._cursor(connection) as cursor:
-                cursor.execute(sql, parameters)
+                _execute(cursor, sql, parameters)
         except JobConfigurationError:
             raise
         except Exception as exc:
@@ -170,11 +190,19 @@ class DatabaseClient:
             raise JobConfigurationError("sql must be a non-blank string")
         if isinstance(chunk_size, bool) or not isinstance(chunk_size, int) or chunk_size < 1:
             raise JobConfigurationError("chunk_size must be an integer >= 1")
+        if isinstance(rows, (str, bytes, bytearray)):
+            raise JobConfigurationError(
+                "rows must be an iterable of parameter sets, not text/bytes"
+            )
+        try:
+            row_iterator = iter(rows)
+        except TypeError as exc:
+            raise JobConfigurationError("rows must be an iterable of parameter sets") from exc
 
         processed = 0
         try:
             with self.connection() as connection, self._cursor(connection) as cursor:
-                for batch in _batched(rows, chunk_size):
+                for batch in _batched(row_iterator, chunk_size):
                     cursor.executemany(sql, batch)
                     processed += len(batch)
         except JobConfigurationError:
@@ -202,7 +230,7 @@ class DatabaseClient:
         try:
             connection = self.get_hook().get_conn()
             with self._cursor(connection) as cursor:
-                cursor.execute(sql, parameters)
+                _execute(cursor, sql, parameters)
                 while True:
                     rows = cursor.fetchmany(fetch_size)
                     if not rows:
@@ -244,10 +272,14 @@ class DatabaseClient:
         if isinstance(max_rows, bool) or not isinstance(max_rows, int) or max_rows < 1:
             raise JobConfigurationError("max_rows must be an integer >= 1")
         result: list[Any] = []
-        for row in self.iter_rows(sql, parameters, fetch_size=fetch_size):
-            result.append(row)
-            if len(result) > max_rows:
-                raise JobConfigurationError(
-                    f"query exceeded max_rows={max_rows}; stream/chunk the result instead"
-                )
+        row_iterator = self.iter_rows(sql, parameters, fetch_size=fetch_size)
+        try:
+            for row in row_iterator:
+                result.append(row)
+                if len(result) > max_rows:
+                    raise JobConfigurationError(
+                        f"query exceeded max_rows={max_rows}; stream/chunk the result instead"
+                    )
+        finally:
+            row_iterator.close()
         return result

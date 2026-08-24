@@ -10,6 +10,18 @@ from airflow_job_template._security import contains_sensitive_uri_data
 
 from .errors import JobConfigurationError
 
+_MAX_ARTIFACT_URI_LENGTH = 4096
+_MAX_BATCH_ID_LENGTH = 256
+
+
+def _validate_optional_datetime(name: str, value: Any) -> None:
+    if value is None:
+        return
+    if not isinstance(value, datetime):
+        raise JobConfigurationError(f"{name} must be a datetime or None")
+    if value.tzinfo is None or value.utcoffset() is None:
+        raise JobConfigurationError(f"{name} must be timezone-aware when set")
+
 
 @dataclass(frozen=True, slots=True)
 class JobRunContext:
@@ -34,9 +46,13 @@ class JobRunContext:
         if self.try_number < 1:
             raise JobConfigurationError("try_number must be >= 1")
         for name in ("logical_date", "data_interval_start", "data_interval_end"):
-            value = getattr(self, name)
-            if value is not None and not isinstance(value, datetime):
-                raise JobConfigurationError(f"{name} must be a datetime or None")
+            _validate_optional_datetime(name, getattr(self, name))
+        if (
+            self.data_interval_start is not None
+            and self.data_interval_end is not None
+            and self.data_interval_start > self.data_interval_end
+        ):
+            raise JobConfigurationError("data_interval_start must not be after data_interval_end")
         if not isinstance(self.params, Mapping):
             raise JobConfigurationError("params must be a mapping at runtime")
         object.__setattr__(self, "params", MappingProxyType(dict(self.params)))
@@ -64,13 +80,22 @@ class JobResult:
             value = getattr(self, name)
             if value is not None and (not isinstance(value, str) or not value.strip()):
                 raise JobConfigurationError(f"JobResult.{name} must be a non-blank string when set")
-        if self.artifact_uri is not None and contains_sensitive_uri_data(self.artifact_uri):
+        if self.artifact_uri is not None:
+            if len(self.artifact_uri) > _MAX_ARTIFACT_URI_LENGTH:
+                raise JobConfigurationError(
+                    f"JobResult.artifact_uri must be <= {_MAX_ARTIFACT_URI_LENGTH} characters"
+                )
+            if contains_sensitive_uri_data(self.artifact_uri):
+                raise JobConfigurationError(
+                    "JobResult.artifact_uri must not contain credentials or tokens"
+                )
+        if self.batch_id is not None and len(self.batch_id) > _MAX_BATCH_ID_LENGTH:
             raise JobConfigurationError(
-                "JobResult.artifact_uri must not contain credentials or tokens"
+                f"JobResult.batch_id must be <= {_MAX_BATCH_ID_LENGTH} characters"
             )
 
     def to_xcom(self) -> dict[str, int | str]:
-        """Return only explicitly populated scalar metadata"""
+        """Return only explicitly populated scalar metadata."""
 
         result: dict[str, int | str] = {}
         for field_info in fields(self):
@@ -90,6 +115,9 @@ def _value(obj: Any, name: str) -> Any:
 
 def job_run_context_from_airflow(context: Mapping[str, Any]) -> JobRunContext:
     """Adapt an Airflow task context mapping without importing Airflow internals"""
+
+    if not isinstance(context, Mapping):
+        raise JobConfigurationError("Airflow context must be a mapping")
 
     ti = context.get("ti") or context.get("task_instance")
     dag = context.get("dag")
@@ -122,7 +150,8 @@ def job_run_context_from_airflow(context: Mapping[str, Any]) -> JobRunContext:
         run_id=run_id,
         try_number=try_number,
         logical_date=context.get("logical_date") or _value(dag_run, "logical_date"),
-        data_interval_start=context.get("data_interval_start"),
-        data_interval_end=context.get("data_interval_end"),
+        data_interval_start=context.get("data_interval_start")
+        or _value(dag_run, "data_interval_start"),
+        data_interval_end=context.get("data_interval_end") or _value(dag_run, "data_interval_end"),
         params=params,
     )

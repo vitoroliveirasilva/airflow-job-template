@@ -38,6 +38,39 @@ def _positive_finite_seconds(value: float, *, name: str) -> float:
     return normalized
 
 
+def _exception_class_names(exc: BaseException) -> set[str]:
+    """Collect class names through normal exception chaining without inspecting messages"""
+
+    names: set[str] = set()
+    seen: set[int] = set()
+    current: BaseException | None = exc
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        names.update(cls.__name__ for cls in type(current).__mro__)
+        current = current.__cause__ or current.__context__
+    return names
+
+
+def _validated_headers(headers: Mapping[str, str] | None) -> dict[str, str]:
+    if headers is None:
+        return {}
+    if not isinstance(headers, Mapping):
+        raise JobConfigurationError("headers must be a mapping when set")
+
+    result: dict[str, str] = {}
+    for name, value in headers.items():
+        if not isinstance(name, str) or not name.strip():
+            raise JobConfigurationError("HTTP header names must be non-blank strings")
+        if name != name.strip() or "\r" in name or "\n" in name:
+            raise JobConfigurationError("HTTP header names must not contain whitespace controls")
+        if not isinstance(value, str):
+            raise JobConfigurationError(f"HTTP header {name!r} value must be a string")
+        if "\r" in value or "\n" in value:
+            raise JobConfigurationError(f"HTTP header {name!r} value must not contain CR/LF")
+        result[name] = value
+    return result
+
+
 @dataclass(frozen=True, slots=True)
 class HttpTimeout:
     """Explicit connect/read timeout pair passed to ``requests`` via HttpHook"""
@@ -83,6 +116,8 @@ class HttpClient:
     ) -> None:
         if not isinstance(conn_id, str) or not conn_id.strip():
             raise JobConfigurationError("conn_id must be a non-blank string")
+        if conn_id != conn_id.strip():
+            raise JobConfigurationError("conn_id must not contain surrounding whitespace")
         if timeout is not None and not isinstance(timeout, HttpTimeout):
             raise JobConfigurationError("timeout must be an HttpTimeout")
         if hook_factory is not None and not callable(hook_factory):
@@ -118,17 +153,20 @@ class HttpClient:
             raise JobConfigurationError("endpoint must be a non-blank string")
         if endpoint != endpoint.strip():
             raise JobConfigurationError("endpoint must not contain surrounding whitespace")
+        if "\r" in endpoint or "\n" in endpoint:
+            raise JobConfigurationError("endpoint must not contain CR/LF characters")
         parsed_endpoint = urlsplit(endpoint)
         if parsed_endpoint.scheme or parsed_endpoint.netloc:
             raise JobConfigurationError(
                 "endpoint must be relative; configure the host in the Airflow Connection"
             )
+        if parsed_endpoint.fragment:
+            raise JobConfigurationError("endpoint must not contain a URI fragment")
         if data is not None and json_body is not None:
             raise JobConfigurationError("set either data or json_body, not both")
         if params is not None and not isinstance(params, Mapping):
             raise JobConfigurationError("params must be a mapping when set")
-        if headers is not None and not isinstance(headers, Mapping):
-            raise JobConfigurationError("headers must be a mapping when set")
+        request_headers = _validated_headers(headers)
         if retry_safe is not None and not isinstance(retry_safe, bool):
             raise JobConfigurationError("retry_safe must be a boolean or None")
 
@@ -147,7 +185,7 @@ class HttpClient:
             response = hook.run(
                 endpoint=endpoint,
                 data=data,
-                headers=dict(headers or {}),
+                headers=request_headers,
                 extra_options={
                     "timeout": self.timeout.as_requests_timeout(),
                     "check_response": False,
@@ -158,7 +196,7 @@ class HttpClient:
         except (JobConfigurationError, NonRetryableJobError, RetryableJobError):
             raise
         except Exception as exc:
-            class_names = {cls.__name__ for cls in type(exc).__mro__}
+            class_names = _exception_class_names(exc)
             if "AirflowNotFoundException" in class_names:
                 raise JobConfigurationError(
                     f"Airflow Connection {self.conn_id!r} was not found"
@@ -235,12 +273,21 @@ class HttpClient:
         ):
             if not isinstance(value, str) or not value.strip():
                 raise JobConfigurationError(f"{name} must be a non-blank string")
+            if value != value.strip():
+                raise JobConfigurationError(f"{name} must not contain surrounding whitespace")
         if page_param == page_size_param:
             raise JobConfigurationError("page_param and page_size_param must be different")
         if params is not None and not isinstance(params, Mapping):
             raise JobConfigurationError("params must be a mapping when set")
 
         base_params = dict(params or {})
+        conflicts = {page_param, page_size_param} & base_params.keys()
+        if conflicts:
+            names = ", ".join(sorted(conflicts))
+            raise JobConfigurationError(
+                f"pagination params must not redefine managed fields: {names}"
+            )
+
         page = start_page
         for _ in range(max_pages):
             request_params = {
