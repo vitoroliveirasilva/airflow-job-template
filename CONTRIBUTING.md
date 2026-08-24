@@ -450,8 +450,7 @@ import pytest
 
 
 @pytest.mark.integration
-def test_real_dependency():
-    ...
+def test_real_dependency(): ...
 ```
 
 Run explicitly:
