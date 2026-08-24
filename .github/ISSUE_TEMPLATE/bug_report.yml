@@ -1,0 +1,162 @@
+name: Bug report
+description: Report reproducible incorrect behavior in the template
+title: "[Bug]: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report a bug.
+
+        Please provide a minimal, reproducible description. Do not include credentials, tokens, private endpoints, customer data, or other sensitive information.
+
+        If this may be a security vulnerability, **do not continue with a public issue**. Follow `SECURITY.md` instead.
+
+  - type: checkboxes
+    id: preflight
+    attributes:
+      label: Pre-flight checks
+      options:
+        - label: I searched existing issues and pull requests for the same problem.
+          required: true
+        - label: I confirmed this is a problem in `airflow-job-template`, not only in my downstream application.
+          required: true
+        - label: I removed credentials, secrets, private data, and sensitive internal details from this report.
+          required: true
+        - label: This is not a security vulnerability that should be reported privately.
+          required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Affected area
+      description: Choose the closest project area.
+      options:
+        - DAG / orchestration
+        - Runtime / JobSpec / TaskPolicy
+        - Error and retry policy
+        - HTTP integration
+        - Database integration
+        - Filesystem helpers
+        - SAP extension point
+        - RPA / isolated execution pattern
+        - Bootstrap project script
+        - New-job scaffold
+        - Structured logging / observability
+        - Secret scanning
+        - Packaging / requirements
+        - CI / GitHub Actions
+        - Documentation
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Problem description
+      description: Explain what is wrong and why it is a bug.
+      placeholder: |
+        When ...
+        the template ...
+        but I expected ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Minimal reproduction
+      description: Provide the smallest reliable set of steps, code, or commands that reproduces the problem.
+      placeholder: |
+        1. Bootstrap ...
+        2. Create ...
+        3. Run ...
+        4. Observe ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: Describe the behavior you expected.
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: Describe what happened instead, including the precise error when possible.
+    validations:
+      required: true
+
+  - type: input
+    id: commit
+    attributes:
+      label: Template branch / commit
+      description: "Example: dev @ abc1234"
+      placeholder: "dev @ <commit SHA>"
+    validations:
+      required: true
+
+  - type: input
+    id: os
+    attributes:
+      label: Operating system
+      placeholder: "Ubuntu 24.04 / WSL2 / Windows 11 / macOS ..."
+    validations:
+      required: true
+
+  - type: input
+    id: python
+    attributes:
+      label: Python version
+      placeholder: "3.12.x"
+    validations:
+      required: true
+
+  - type: input
+    id: airflow
+    attributes:
+      label: Apache Airflow version
+      description: Use N/A only when the bug is fully Airflow-independent.
+      placeholder: "3.3.1 / N/A"
+    validations:
+      required: true
+
+  - type: textarea
+    id: providers
+    attributes:
+      label: Relevant providers and versions
+      description: List only providers related to the failure.
+      placeholder: |
+        apache-airflow-providers-standard==...
+        apache-airflow-providers-http==...
+
+  - type: textarea
+    id: validation
+    attributes:
+      label: Validation already performed
+      description: Include relevant commands and results.
+      placeholder: |
+        ruff format --check .  -> pass
+        ruff check .           -> pass
+        pytest                 -> ...
+        python scripts/check_secrets.py -> ...
+        airflow dags list-import-errors --local -> ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Sanitized traceback or logs
+      description: Remove secrets, Authorization headers, credential-bearing URLs, private data, and unnecessary payloads.
+      render: text
+
+  - type: textarea
+    id: notes
+    attributes:
+      label: Additional context
+      description: Add any relevant architectural, compatibility, regression, or timing information.

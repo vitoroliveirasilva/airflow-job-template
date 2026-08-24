@@ -1,0 +1,138 @@
+name: Feature request
+description: Propose a focused improvement to the reusable template
+title: "[Feature]: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        New abstractions carry a maintenance cost in a template.
+
+        Please describe the concrete problem first, then the proposed solution. If Airflow or an official/community provider already solves the problem well, explain why an additional project abstraction is still useful.
+
+  - type: checkboxes
+    id: preflight
+    attributes:
+      label: Pre-flight checks
+      options:
+        - label: I searched existing issues and pull requests for the same proposal.
+          required: true
+        - label: I reviewed the README and architecture documentation relevant to this proposal.
+          required: true
+        - label: I considered whether native Airflow or an existing provider already solves this problem.
+          required: true
+
+  - type: dropdown
+    id: category
+    attributes:
+      label: Proposal category
+      options:
+        - Core runtime
+        - DAG authoring pattern
+        - Scaffold / generator
+        - HTTP integration
+        - Database integration
+        - Files
+        - SAP
+        - RPA / isolated execution
+        - Observability
+        - Security
+        - Testing / CI
+        - Packaging / dependency management
+        - Documentation / developer experience
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem to solve
+      description: Describe the real workflow or repeated pain point. Avoid starting with the implementation.
+      placeholder: |
+        Today, when building ...
+        developers must ...
+        this creates ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: examples
+    attributes:
+      label: Concrete use cases
+      description: Provide one or more realistic examples where this capability would be used.
+      placeholder: |
+        Use case 1:
+        Use case 2:
+    validations:
+      required: true
+
+  - type: textarea
+    id: existing
+    attributes:
+      label: Existing Airflow/provider capabilities considered
+      description: Identify native features, operators, Hooks, TaskFlow APIs, providers, sensors, mapping, isolation mechanisms, etc. that you considered.
+      placeholder: |
+        I considered ...
+        It does/does not solve the problem because ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed solution
+      description: Explain the smallest reusable change that solves the problem.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Include simpler options and explain why they are insufficient.
+
+  - type: checkboxes
+    id: impact
+    attributes:
+      label: Expected impact
+      description: Select every area that may be affected.
+      options:
+        - label: Public Python API
+        - label: Generated scaffold output
+        - label: DAG parsing / serialization
+        - label: Retry / error semantics
+        - label: Security model
+        - label: Dependency set
+        - label: Airflow/provider compatibility
+        - label: Backwards compatibility
+        - label: Documentation
+        - label: CI / quality gates
+
+  - type: textarea
+    id: abstraction
+    attributes:
+      label: Why this belongs in the reusable template
+      description: Explain why this is repeated infrastructure value rather than job-specific business logic.
+    validations:
+      required: true
+
+  - type: textarea
+    id: compatibility
+    attributes:
+      label: Compatibility and migration considerations
+      description: State whether existing generated projects or imports may be affected. Write "None known" if applicable.
+    validations:
+      required: true
+
+  - type: textarea
+    id: security
+    attributes:
+      label: Security considerations
+      description: Consider secrets, network access, SQL, filesystem paths, logs, Params, XCom, shell execution, and isolation as applicable.
+      placeholder: "None known, because ... / The proposal affects ..."
+
+  - type: textarea
+    id: notes
+    attributes:
+      label: Additional context
+      description: Add references, diagrams, pseudo-code, benchmarks, or links to relevant Airflow/provider documentation.

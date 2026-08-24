@@ -1,0 +1,65 @@
+[build-system]
+requires = ["setuptools>=75", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "airflow-job-template"
+version = "0.1.0"
+description = "Reusable starter for production-oriented Apache Airflow jobs and workflows."
+readme = "README.md"
+requires-python = ">=3.12,<3.15"
+license = { text = "MIT" }
+authors = [
+  { name = "Vitor Oliveira Silva", email = "vitorsimon04@gmail.com" },
+]
+maintainers = [
+  { name = "Vitor Oliveira Silva", email = "vitorsimon04@gmail.com" },
+]
+dependencies = [
+  "apache-airflow>=3.3,<3.4",
+  "apache-airflow-providers-standard>=1.0",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.airflow-job-template]
+package = "airflow_job_template"
+project_slug = "airflow-job-template"
+bootstrapped = false
+
+[tool.pytest.ini_options]
+addopts = "-ra --strict-markers --strict-config"
+testpaths = ["tests"]
+markers = [
+  "integration: tests that require configured external systems or Airflow services",
+]
+filterwarnings = [
+  "error::DeprecationWarning:airflow_job_template.*",
+]
+
+[tool.coverage.run]
+branch = true
+source = ["src/airflow_job_template"]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = true
+fail_under = 70
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+src = ["src", "tests", "scripts", "dags", "examples"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "S", "SIM", "PIE", "RUF", "AIR"]
+ignore = ["S608"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**/*.py" = ["S101"]
+"examples/**/*.py" = ["S101"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"

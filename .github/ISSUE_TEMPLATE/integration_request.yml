@@ -1,0 +1,110 @@
+name: Integration or provider request
+description: Propose support or a documented pattern for an external system/provider
+title: "[Integration]: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        This project intentionally avoids pretending that every external system can be hidden behind one universal client.
+
+        Use this form when proposing a reusable integration helper, optional provider, or documented integration pattern.
+
+  - type: checkboxes
+    id: preflight
+    attributes:
+      label: Pre-flight checks
+      options:
+        - label: I searched existing issues, examples, requirements, and integrations.
+          required: true
+        - label: I checked whether an official or community Airflow provider already exists.
+          required: true
+        - label: The requirement is reusable across more than one concrete job, or there is a strong reason it should be documented centrally.
+          required: true
+
+  - type: input
+    id: system
+    attributes:
+      label: External system / technology
+      placeholder: "PostgreSQL / Microsoft SQL Server / SAP OData / Playwright / ..."
+    validations:
+      required: true
+
+  - type: input
+    id: provider
+    attributes:
+      label: Existing Airflow provider, Hook or operator
+      description: Include package/object names when known. Write "None found" if applicable.
+      placeholder: "apache-airflow-providers-... / ...Hook / ...Operator / None found"
+    validations:
+      required: true
+
+  - type: textarea
+    id: need
+    attributes:
+      label: Reusable need
+      description: Describe the repeated behavior that is missing.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: desired
+    attributes:
+      label: Preferred project-level outcome
+      options:
+        - Documentation only
+        - Example only
+        - Optional requirements entry
+        - Small integration helper
+        - Scaffold option/pattern
+        - Not sure
+    validations:
+      required: true
+
+  - type: textarea
+    id: native
+    attributes:
+      label: Why the native provider/operator alone is insufficient
+      description: If it is sufficient, explain why documentation/example support is still useful.
+    validations:
+      required: true
+
+  - type: textarea
+    id: dependencies
+    attributes:
+      label: Dependencies and runtime requirements
+      description: Include system libraries, drivers, browsers, Java, proprietary SDKs, Docker/Kubernetes requirements, etc.
+      placeholder: |
+        Python packages:
+        System dependencies:
+        Runtime/isolation requirements:
+    validations:
+      required: true
+
+  - type: textarea
+    id: config
+    attributes:
+      label: Configuration and credential model
+      description: Explain which values belong in Connections, Secrets Backend, Variables, Params, or code. Do not include real secrets.
+    validations:
+      required: true
+
+  - type: textarea
+    id: retry
+    attributes:
+      label: Retry and idempotency model
+      description: For mutable operations, explain how repeated attempts are made safe.
+    validations:
+      required: true
+
+  - type: textarea
+    id: testing
+    attributes:
+      label: Testing strategy
+      description: Explain what can be unit-tested with fakes and what would require a marked integration test.
+    validations:
+      required: true
+
+  - type: textarea
+    id: notes
+    attributes:
+      label: Additional context

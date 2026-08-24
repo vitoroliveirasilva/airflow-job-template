@@ -1,0 +1,2 @@
+# Resolve with the same Airflow constraints URL used for the core environment
+apache-airflow-providers-microsoft-mssql

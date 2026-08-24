@@ -216,3 +216,27 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Airflow template additions
+.env.*
+!.env.example
+.venv/
+.airflow/
+airflow.db
+airflow.db-shm
+airflow.db-wal
+standalone_admin_password.txt
+webserver_config.py
+logs/
+postgres-data/
+redis-data/
+.tmp/
+tmp/
+artifacts/
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+.idea/
+.vscode/
