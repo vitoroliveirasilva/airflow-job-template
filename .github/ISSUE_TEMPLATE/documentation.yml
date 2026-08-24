@@ -1,0 +1,60 @@
+name: Documentation issue
+description: Report missing, misleading, inconsistent, or unclear project documentation
+title: "[Docs]: "
+body:
+  - type: checkboxes
+    id: preflight
+    attributes:
+      label: Pre-flight checks
+      options:
+        - label: I searched the README and `docs/` for the information.
+          required: true
+        - label: I searched existing issues and pull requests for the same documentation problem.
+          required: true
+
+  - type: dropdown
+    id: location
+    attributes:
+      label: Documentation area
+      options:
+        - README
+        - Architecture
+        - Development / quality gates
+        - Installation
+        - Scaffold / bootstrap
+        - Simple Job pattern
+        - Explicit Workflow pattern
+        - Isolated Job pattern
+        - Integrations
+        - Security
+        - Contributing
+        - Examples
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What is unclear, missing, or incorrect?
+    validations:
+      required: true
+
+  - type: textarea
+    id: risk
+    attributes:
+      label: Why it matters
+      description: Explain whether the current wording can lead to incorrect setup, unsafe behavior, architecture drift, failed validation, or simple confusion.
+    validations:
+      required: true
+
+  - type: textarea
+    id: suggestion
+    attributes:
+      label: Suggested improvement
+      description: Optional. Describe the wording, example, diagram, or section that would resolve the problem.
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
