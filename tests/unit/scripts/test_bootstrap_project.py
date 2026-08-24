@@ -52,6 +52,7 @@ def test_bootstrap_does_not_rewrite_its_own_contract_tests(tmp_path: Path) -> No
         "scripts/bootstrap_project.py": 'PLACEHOLDER_PACKAGE = "airflow_job_template"\n',
         "tests/unit/scripts/test_bootstrap_project.py": "airflow_job_template\n",
         "tests/unit/scripts/test_new_job.py": "airflow_job_template\n",
+        "tests/unit/scripts/test_scripts_production_regressions.py": "airflow_job_template\n",
     }
     for relative, content in protected.items():
         path = root / relative

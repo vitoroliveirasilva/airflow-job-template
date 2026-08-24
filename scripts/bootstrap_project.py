@@ -30,10 +30,14 @@ PROTECTED_PATHS = {
     Path("scripts/bootstrap_project.py"),
     Path("tests/unit/scripts/test_bootstrap_project.py"),
     Path("tests/unit/scripts/test_new_job.py"),
+    Path("tests/unit/scripts/test_scripts_production_regressions.py"),
 }
 
 SLUG_RE = re.compile(r"^[a-z][a-z0-9_-]{1,63}$")
 _SECTION_RE = re.compile(r"^\s*\[([^\[\]]+)]\s*(?:#.*)?$")
+
+_WINDOWS_RETRY_ATTEMPTS = 5
+_WINDOWS_RETRY_BASE_DELAY_SECONDS = 0.05
 
 
 class BootstrapError(RuntimeError):
@@ -58,10 +62,16 @@ def package_name_for(slug: str) -> str:
     return f"{slug.replace('-', '_')}_airflow"
 
 
+def _retry_delay(attempt: int) -> None:
+    """Sleep briefly between retries for transient Windows filesystem locks"""
+
+    time.sleep(_WINDOWS_RETRY_BASE_DELAY_SECONDS * (2**attempt))
+
+
 def _replace_file(source: Path, destination: Path) -> None:
     """Atomically replace a file, tolerating transient Windows file locks"""
 
-    attempts = 3 if os.name == "nt" else 1
+    attempts = _WINDOWS_RETRY_ATTEMPTS if os.name == "nt" else 1
 
     for attempt in range(attempts):
         try:
@@ -71,7 +81,23 @@ def _replace_file(source: Path, destination: Path) -> None:
             if attempt == attempts - 1:
                 raise
 
-            time.sleep(0.05 * (2**attempt))
+            _retry_delay(attempt)
+
+
+def _rename_path(source: Path, destination: Path) -> None:
+    """Rename a filesystem path, tolerating transient Windows file locks"""
+
+    attempts = _WINDOWS_RETRY_ATTEMPTS if os.name == "nt" else 1
+
+    for attempt in range(attempts):
+        try:
+            os.rename(source, destination)
+            return
+        except PermissionError:
+            if attempt == attempts - 1:
+                raise
+
+            _retry_delay(attempt)
 
 
 def _set_toml_assignment(
@@ -132,8 +158,8 @@ def _atomic_write(path: Path, content: str) -> None:
             handle.flush()
             os.fsync(handle.fileno())
 
-        # Windows does not implement the complete POSIX permission model.
-        # chmod is therefore only used here when running on POSIX.
+        # Windows does not expose the complete POSIX permission model.
+        # Preserve exact mode bits only where the operating system supports them.
         if os.name != "nt":
             os.chmod(temp_path, original_mode)
 
@@ -287,7 +313,7 @@ def bootstrap(root: Path, slug: str) -> list[Path]:
     renamed = False
 
     try:
-        source_dir.rename(target_dir)
+        _rename_path(source_dir, target_dir)
         renamed = True
 
         for path, updated in replacements.items():
@@ -296,7 +322,10 @@ def bootstrap(root: Path, slug: str) -> list[Path]:
             if source_dir in path.parents:
                 actual_path = target_dir / path.relative_to(source_dir)
 
-            _atomic_write(actual_path, updated)
+            _atomic_write(
+                actual_path,
+                updated,
+            )
             changed.append(actual_path)
 
     except Exception:
@@ -313,7 +342,10 @@ def bootstrap(root: Path, slug: str) -> list[Path]:
                 )
 
         if renamed and target_dir.exists() and not source_dir.exists():
-            target_dir.rename(source_dir)
+            _rename_path(
+                target_dir,
+                source_dir,
+            )
 
         raise
 
